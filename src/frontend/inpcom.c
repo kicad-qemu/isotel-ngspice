@@ -876,13 +876,24 @@ inp_read(FILE *fp, int call_depth, char *dir_name, bool comfile, bool intfile)
                  !ciprefix("echo", buffer) &&
                  !ciprefix("shell", buffer) &&
                  !ciprefix("source", buffer) &&
-                 !ciprefix("load", buffer)
+                 !ciprefix("load", buffer) &&
+                 !(ciprefix("set", buffer) && strstr(buffer, "sourcepath"))
                 )
             {
                 /* lower case for all lines (exceptions see above!) */
                 for (s = buffer; *s && (*s != '\n'); s++)
                     *s = tolower_c(*s);
             } else {
+                char *p;
+                if ( (p=strstr(buffer, "sourcepath"))) {
+                    if ( (p = strchr(buffer, ')'))) {
+                        *p = 0;     // clear ) and insert Inp_Path in between
+                        p = tprintf("%s %s ) %s", buffer, Inp_Path ? Inp_Path : "", p+1);
+                        tfree(buffer);
+                        buffer = p;
+                    }
+                }
+
                 /* exclude some commands to preserve filename case */
                 for (s = buffer; *s && (*s != '\n'); s++)
                     ;
@@ -1106,7 +1117,22 @@ inp_pathresolve_at(char *name, char *dir)
         }
     }
 
-    /* concatenate them */
+    /* 
+     * Try in current dir and then in the actual dir file was read.
+     * Current dir . is needed to correctly support absolute paths in sourcepath
+     */
+
+    strcpy(buf, ".");
+
+    end = strchr(buf, '\0');
+    if (end[-1] != DIR_TERM)
+        *end++ = DIR_TERM;
+
+    strcpy(end, name);
+
+    char * r = inp_pathresolve(buf);
+    if (r) 
+        return r;
 
     strcpy(buf, dir);
 
