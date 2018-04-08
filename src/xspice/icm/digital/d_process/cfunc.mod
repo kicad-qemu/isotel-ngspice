@@ -23,8 +23,7 @@ PROJECT http://isotel.eu/mixedsim
 
 AUTHORS                      
 
-    9 November 2017 Uros Platse <uros@isotel.eu>
-    4 April 2018 Uros Platse <uros@isotel.eu>
+    2017-2018 Uros Platse <uros@isotel.eu>
                                    
 
 SUMMARY
@@ -47,31 +46,31 @@ SUMMARY
     On start:
 
         outputs are set to uknown state and high impedance
-        
-    Then on each rising edge of reset:
-    
-        double (8-byte): negative value of time
-        [inputs array ]: input bytes, each byte packs up to 8 inputs
-        digital outputs are preset to strong low
-        
-    or on each rising edge of a clock and reset being low
+                
+    On each rising edge of a clock and reset being low
 
-        double (8-byte): positive value of time
+        double (8-byte): positive value of TIME if reset is low otherwise -TIME
         [inputs array ]: input bytes, each byte packs up to 8 inputs
         ooutputs are defined by returning process
 
-    where process must return either on reset (which is however ignored) 
-    or on rising clock:
+    and process must return:
     
         [output array]: output bytes, each byte packs up to 8 outputs
 
     For example project please see: http://isotel.eu/mixedsim
 
 
-NOTES
-
-
 MODIFICATIONS
+
+    9 November 2017 Uros Platse <uros@isotel.eu>
+        - Initial design, ready for use with projects
+
+    4 April 2018 Uros Platse <uros@isotel.eu>
+        - Tested and polished ready to be published
+
+    7 April 2018 Uros Platse <uros@isotel.eu>
+        Removed async reset and converted it to synchronous reset only. 
+        Code cleanup.
 
 
 REFERENCED FILES
@@ -261,7 +260,7 @@ void cm_d_process(ARGS)
     }
 
 
-    if ( 0.0 == TIME ) {    /****** DC analysis...output w/o delays ******/                     
+    if ( 0.0 == TIME ) {    /****** DC analysis...output w/o delays ******/
         for (i=0; i<PORT_SIZE(out); i++) {
             local_process->dout_old[i] = UNKNOWN;
             OUTPUT_STATE(out[i])       = UNKNOWN;
@@ -278,108 +277,41 @@ void cm_d_process(ARGS)
             *reset = INPUT_STATE(reset);
         }
 
-        if ( *reset != *reset_old ) {   /* either reset or reset release */
-            switch ( *reset ) {
+        if (*clk != *clk_old && ONE == *clk) {
+            uint8_t dout[local_process->N_dout];                    
+            uint8_t din[local_process->N_din];
+            uint8_t b;
+            memset(din, 0, local_process->N_din);
 
-            case ONE: {
-                    uint8_t dout[local_process->N_dout];                    
-                    uint8_t din[local_process->N_din];
-                    uint8_t b;
-                    memset(din, 0, local_process->N_din);
-
-                    for (i=0; i<PORT_SIZE(in); i++) {
-                        switch(INPUT_STATE(in[i])) {
-                            case ZERO: b = 0; break;
-                            case ONE:  b = 1; break;
-                            default:   b = random() & 1; break;
-                        }
-                        din[i >> 3] |= (uint8_t)(b << (i & 7));
-                    }
-                    
-                    exchangedata(local_process, -TIME, din, dout);
+            for (i=0; i<PORT_SIZE(in); i++) {
+                switch(INPUT_STATE(in[i])) {
+                    case ZERO: b = 0; break;
+                    case ONE:  b = 1; break;
+                    default:   b = random() & 1; break;
                 }
+                din[i >> 3] |= (uint8_t)(b << (i & 7));
+            }
+
+            exchangedata(local_process, (ONE != *reset) ? TIME : -TIME, din, dout);
+            
+            for (int i=0; i<PORT_SIZE(out); i++) {
+                Digital_State_t new_state = ((dout[i >> 3] >> (i & 7)) & 0x01) ? ONE : ZERO;
                 
-                // however we ignore dout and put reset state at the output
-
-                for (i=0; i<PORT_SIZE(out); i++) {
-                    if (ZERO != local_process->dout_old[i]) {
-                        local_process->dout_old[i] = ZERO;
-                        OUTPUT_STATE(out[i])    = ZERO;
-                        OUTPUT_STRENGTH(out[i]) = STRONG;
-                        OUTPUT_DELAY(out[i])    = PARAM(reset_delay);
-                    }
-                    else {
-                        OUTPUT_CHANGED(out[i]) = FALSE;
-                    }                                    
+                if (new_state != local_process->dout_old[i]) {
+                    OUTPUT_STATE(out[i])    = new_state;
+                    OUTPUT_STRENGTH(out[i]) = STRONG;
+                    OUTPUT_DELAY(out[i])    = PARAM(clk_delay);
+                    local_process->dout_old[i] = new_state;
                 }
-                break;
-
-            case ZERO:
-            case UNKNOWN:
-                for (i=0; i<PORT_SIZE(out); i++) {
+                else {
                     OUTPUT_CHANGED(out[i]) = FALSE;
-                }
-                break;
-
+                }                                    
             }
         }
-        else {          
-            if ( ONE != *reset ) {
-                if (*clk != *clk_old) {
-                    switch ( *clk ) {          
-    
-                    case ONE: {
-                            uint8_t dout[local_process->N_dout];                    
-                            uint8_t din[local_process->N_din];
-                            uint8_t b;
-                            memset(din, 0, local_process->N_din);
-
-                            for (i=0; i<PORT_SIZE(in); i++) {
-                                switch(INPUT_STATE(in[i])) {
-                                    case ZERO: b = 0; break;
-                                    case ONE:  b = 1; break;
-                                    default:   b = random() & 1; break;
-                                }
-                                din[i >> 3] |= (uint8_t)(b << (i & 7));
-                            }
-                            
-                            exchangedata(local_process, TIME, din, dout);
-                            
-                            for (int i=0; i<PORT_SIZE(out); i++) {
-                                Digital_State_t new_state = ((dout[i >> 3] >> (i & 7)) & 0x01) ? ONE : ZERO;
-                                
-                                if (new_state != local_process->dout_old[i]) {
-                                    OUTPUT_STATE(out[i])    = new_state;
-                                    OUTPUT_STRENGTH(out[i]) = STRONG;
-                                    OUTPUT_DELAY(out[i])    = PARAM(clk_delay);
-                                    local_process->dout_old[i] = new_state;
-                                }
-                                else {
-                                    OUTPUT_CHANGED(out[i]) = FALSE;
-                                }                                    
-                            }
-                        }
-                        break;
-    
-                    case ZERO:
-                    case UNKNOWN:                        
-                        for (i=0; i<PORT_SIZE(out); i++) {
-                            OUTPUT_CHANGED(out[i]) = FALSE;
-                        }    
-                        break;
-                    }
-                } 
-                else {
-                    for (i=0; i<PORT_SIZE(out); i++) {
-                        OUTPUT_CHANGED(out[i]) = FALSE;
-                    }
-                }
+        else {
+            for (i=0; i<PORT_SIZE(out); i++) {
+                OUTPUT_CHANGED(out[i]) = FALSE;
             }
-            else {
-                for (i=0; i<PORT_SIZE(out); i++) {
-                    OUTPUT_CHANGED(out[i]) = FALSE;
-                }
-            }
-        }        
+        }
     }
 }
