@@ -49,6 +49,7 @@ SUBDIRS = \
 	vbic	\
 	vccs	\
 	vcvs	\
+	vdmos	\
 	vsrc	\
 	@VLADEVDIR@
 
@@ -61,7 +62,6 @@ SUBDIRS += nbjt nbjt2 numd  numd2 numos
 endif
 
 DIST_SUBDIRS = \
-	@VLADEVDIR@ \
 	asrc	\
 	bjt	\
 	bsim1	\
@@ -111,6 +111,7 @@ DIST_SUBDIRS = \
 	vbic	\
 	vccs	\
 	vcvs	\
+	vdmos	\
 	vsrc	\
 	nbjt	\
 	nbjt2	\
@@ -135,7 +136,7 @@ libdev_la_SOURCES =	\
 	cktsoachk.c	\
 	limit.c
 
-EXTRA_DIST = @NOTVLADEVDIR@
+EXTRA_DIST = adms/admst
 
 AM_CPPFLAGS = @AM_CPPFLAGS@ -I$(top_srcdir)/src/include -I$(top_srcdir)/src/spicelib/devices
 AM_CFLAGS = $(STATIC)

@@ -17,16 +17,18 @@ endif
 
 if !TCL_MODULE
 if !SHARED_MODULE
-bin_PROGRAMS =  ngspice ngnutmeg
+bin_PROGRAMS =  ngspice
 
+if OLDAPPS
 if !WINGUI
-bin_PROGRAMS += ngsconvert ngproc2mod ngmultidec ngmakeidx
+bin_PROGRAMS += ngnutmeg ngsconvert ngproc2mod ngmultidec ngmakeidx
 helpdatadir = $(pkgdatadir)/helpdir
 helpdata_DATA = ngspice.txt ngspice.idx
 if !NO_HELP
 bin_PROGRAMS += nghelp
 endif !NO_HELP
 endif !WINGUI
+endif OLDAPPS
 endif !SHARED_MODULE
 endif !TCL_MODULE
 
@@ -92,6 +94,7 @@ DYNAMIC_DEVICELIBS =					\
 	spicelib/devices/vbic/libvbic.la		\
 	spicelib/devices/vccs/libvccs.la		\
 	spicelib/devices/vcvs/libvcvs.la		\
+	spicelib/devices/vdmos/libvdmos.la		\
 	spicelib/devices/vsrc/libvsrc.la		\
 	@VLADEV@
 
@@ -187,7 +190,7 @@ ngspice_LDADD += frontend/help/libhlp.la
 endif
 endif
 
-
+if OLDAPPS
 ## nutmeg:
 
 ngnutmeg_SOURCES = \
@@ -292,6 +295,7 @@ ngspice.idx: ngmakeidx$(EXEEXT) $(srcdir)/ngspice.txt
 
 endif !SHWIN
 endif !WINGUI
+endif OLDAPPS
 
 if RELPATH
 spinitpath=../lib/ngspice

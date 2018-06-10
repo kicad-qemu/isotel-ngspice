@@ -10,7 +10,7 @@
 /*******************/
 
 #ifdef _MSC_VER
-#define SHAREDSPICE_version "25.1"
+#define SHAREDSPICE_version "28.0"
 #define STDIN_FILENO    0
 #define STDOUT_FILENO   1
 #define STDERR_FILENO   2
@@ -172,6 +172,12 @@ extern int SIMinit(IFfrontEnd *frontEnd, IFsimulator **simulator);
 extern wordlist *cp_varwl(struct variable *var);
 extern void create_circbyline(char *line);
 
+#ifdef XSPICE
+extern struct evt_shared_data *EVTshareddata(char *node_name);
+extern char** EVTallnodes(void);
+extern bool wantevtdata;
+#endif
+
 
 /*The current run (to get variable names, etc)*/
 static runDesc *cur_run;
@@ -212,6 +218,9 @@ static GetVSRCData* getvdat;
 static GetISRCData* getidat;
 static GetSyncData* getsync;
 static pvector_info myvec = NULL;
+#ifdef XSPICE
+static struct dvec *infovec = NULL;
+#endif
 char **allvecs = NULL;
 char **allplots = NULL;
 static bool noprintfwanted = FALSE;
@@ -226,6 +235,9 @@ static bool immediate = FALSE;
 static bool coquit = FALSE;
 static jmp_buf errbufm, errbufc;
 static int intermj = 1;
+static SendInitEvtData* sendinitevt;
+static SendEvtData* sendevt;
+static void* euserptr;
 
 
 // thread IDs
@@ -675,32 +687,38 @@ ngSpice_Init(SendChar* printfcn, SendStat* statusfcn, ControlledExit* ngspiceexi
         tfree(s);
     }
 #else /* ~ HAVE_PWD_H */
-    /* load user's initialisation file
-       try accessing the initialisation file in the current directory
-       if that fails try the alternate name */
-    if (FALSE == read_initialisation_file("", INITSTR) &&
-        FALSE == read_initialisation_file("", ALT_INITSTR)) {
-        /* if that failed try in the user's home directory
-        if their HOME environment variable is set */
-        char *homedir = getenv("HOME");
-        if (homedir) {
-            if (FALSE == read_initialisation_file(homedir, INITSTR) &&
-                FALSE == read_initialisation_file(homedir, ALT_INITSTR)) {
-                ;
-            }
-        }
+    /* load user's initialisation file .spiceinit (or old spice.rc)
+       try accessing the initialisation file in the current directory,
+       or the user's home directories HOME (Linux) and USERPROFILE (MS Windows)*/
+    char *homedir;
+    bool userfileok = read_initialisation_file("", INITSTR); /*.spiceinit*/
+    if (!userfileok) {
+        homedir = getenv("HOME");
+        if (homedir)
+            userfileok = read_initialisation_file(homedir, INITSTR);
         else {
-            /* If there is no HOME environment (e.g. MS Windows), try user's profile directory */
             homedir = getenv("USERPROFILE");
             if (homedir)
-                if (FALSE == read_initialisation_file(homedir, INITSTR) &&
-                    FALSE == read_initialisation_file(homedir, ALT_INITSTR)) {
-                    ;
-                }
+                userfileok = read_initialisation_file(homedir, INITSTR);
+        }
+    }
+    if (!userfileok)
+        userfileok = read_initialisation_file("", ALT_INITSTR); /*spice.rc*/
+    if (!userfileok) {
+        homedir = getenv("HOME");
+        if (homedir)
+            userfileok = read_initialisation_file(homedir, ALT_INITSTR);
+        else {
+            homedir = getenv("USERPROFILE");
+            if (homedir)
+                userfileok = read_initialisation_file(homedir, ALT_INITSTR);
         }
     }
 
+    if (!userfileok && ft_ngdebug)
+        fprintf(stdout, "Warning: No user initialization file .spiceinit or spice.rc found\n");
 #endif /* ~ HAVE_PWD_H */
+
 bot:
     signal(SIGINT, old_sigint);
 
@@ -764,6 +782,20 @@ bot:
     return 0;
 }
 
+
+/* to be called upon 'quit' */
+void
+sh_delete_myvec(void)
+{
+    tfree(myvec);
+#ifdef XSPICE
+    if (infovec) {
+        dvec_free(infovec->v_scale);
+        dvec_free(infovec);
+    }
+#endif
+}
+
 /* retrieve a ngspice command from caller and run it
 immediately */
 IMPEXP
@@ -798,6 +830,15 @@ pvector_info  ngGet_Vec_Info(char* vecname)
         return NULL;
     }
 
+#ifdef XSPICE
+    /* If vector is derived from event data, free it */
+    if (infovec) {
+        dvec_free(infovec->v_scale);
+        dvec_free(infovec);
+        infovec = NULL;
+    }
+#endif
+
     newvec = vec_get(vecname);
 
     if (newvec == NULL) {
@@ -815,6 +856,13 @@ pvector_info  ngGet_Vec_Info(char* vecname)
     myvec->v_realdata = newvec->v_realdata;
     myvec->v_compdata = newvec->v_compdata;
     myvec->v_length = newvec->v_length;
+
+#ifdef XSPICE
+    /* If we have a vector derived from event data, store its pointer */
+    if (newvec->v_scale && newvec->v_scale->v_name && eq(newvec->v_scale->v_name, "step"))
+        infovec = newvec;
+#endif
+
     return myvec;
 };
 
@@ -951,6 +999,37 @@ bool ngSpice_SetBkpt(double time)
         return(FALSE);
     return(TRUE);
 }
+
+#ifdef XSPICE
+/* return callback initialization addresses to caller */
+IMPEXP
+int  ngSpice_Init_Evt(SendEvtData* sevtdata, SendInitEvtData* sinitevtdata, void* userData)
+{
+    if (sevtdata)
+        wantevtdata = TRUE;
+    else
+        wantevtdata = FALSE;
+    sendinitevt = sinitevtdata;
+    sendevt = sevtdata;
+    euserptr = userData;
+    return(TRUE);
+}
+
+/* Get info about the event node vector.
+If node_name is NULL, just delete previous data */
+IMPEXP
+pevt_shared_data ngGet_Evt_NodeInfo(char* node_name)
+{
+    return EVTshareddata(node_name);
+}
+
+/* get a list of all event nodes */
+IMPEXP
+char** ngSpice_AllEvtNodes(void)
+{
+    return EVTallnodes();
+}
+#endif
 
 
 /* add the preliminary breakpoints to the list.
@@ -1899,3 +1978,17 @@ sharedsync(double *pckttime, double *pcktdelta, double olddelta, double finalt,
         }
     }
 }
+
+void shared_send_event(int index, double step, double dvalue, char *svalue, void *pvalue, int plen, int mode)
+{
+    if(wantevtdata)
+        sendevt(index, step, dvalue, svalue, pvalue, plen, mode, ng_ident, euserptr);
+    return;
+}
+
+void shared_send_dict(int index, int no_of_nodes, char* name, char*type)
+{
+    if (sendinitevt)
+        sendinitevt(index, no_of_nodes, name, type, ng_ident, euserptr);
+}
+

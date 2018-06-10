@@ -17,6 +17,8 @@ AUTHORS
 MODIFICATIONS
 
     7/11/2012  Holger Vogt   Replace printf by out_printf to allow output redirection
+    5/21/2017  Holger Vogt   Update 'edisplay': add node type and number of events
+    5/26/2018  Uros Platise  Update 'EVTprintvcd': stepsize based on tstep
 
 SUMMARY
 
@@ -388,6 +390,8 @@ EVTdisplay(wordlist *wl)
 {
     Evt_Node_Info_t  *node;
     CKTcircuit       *ckt;
+    int node_index, udn_index;
+    Evt_Node_Info_t  **node_table;
 
     NG_IGNORE(wl);
     ckt = g_mif_info.ckt;
@@ -396,15 +400,32 @@ EVTdisplay(wordlist *wl)
         return;
     }
     node = ckt->evt->info.node_list;
+    node_table = ckt->evt->info.node_table;
     out_init();
     if (!node) {
         out_printf("No event node available!\n");
         return;
     }
-    out_printf("List of event nodes\n");
+    out_printf("\nList of event nodes\n");
+    out_printf("    %-20s: %-5s, %s\n\n", "node name", "type", "number of events");
+    node_index = 0;
     while (node) {
-        out_printf("%s\n", node->name);
+        Evt_Node_t  *node_data = NULL;
+        int count = 0;
+        char *type;
+
+        udn_index = node_table[node_index]->udn_index;
+        if (ckt->evt->data.node)
+            node_data = ckt->evt->data.node->head[node_index];
+        while (node_data) {
+            count++;
+            node_data = node_data->next;
+        }
+        type = g_evt_udn_info[udn_index]->name;
+        out_printf("    %-20s: %-5s, %5d\n", node->name, type, count);
+
         node = node->next;
+        node_index++;
     }
 }
 
@@ -565,8 +586,7 @@ EVTprintvcd(wordlist *wl)
     double scale;
     double tstep = ckt->CKTstep;
 
-    /* if selected time step is down to [ms] then report time at [us] etc. 
-       always with one level higher resolution */
+    /* if selected time step is down to [ms] then report time at [us] etc., always with one level higher resolution */
     if (tstep >= 1e-3) {
         unit = "us";
         scale = 1e6;
@@ -657,7 +677,6 @@ EVTprintvcd(wordlist *wl)
 
         /* timestamp */
         out_printf("#%lld\n", (unsigned long long)(this_step * scale));
-
         /* print only values that have changed */
         for (i = 0; i < nargs; i++) {
             if (!eq(old_node_value[i], node_value[i])) {

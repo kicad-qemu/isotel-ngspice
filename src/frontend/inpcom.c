@@ -90,7 +90,7 @@ struct func_temper
 
 extern void line_free_x(struct card *deck, bool recurse);
 
-static COMPATMODE_T inp_compat_mode;
+COMPATMODE_T inp_compat_mode;
 
 /* Collect information for dynamic allocation of numparam arrays */
 /* number of lines in input deck */
@@ -120,6 +120,7 @@ static char *inp_remove_ws(char *s);
 static void inp_compat(struct card *deck);
 static void inp_bsource_compat(struct card *deck);
 static bool inp_temper_compat(struct card *card);
+static void inp_meas_current(struct card *card);
 static void inp_dot_if(struct card *deck);
 static char *inp_modify_exp(char* expression);
 static struct func_temper *inp_new_func(char *funcname, char *funcbody, struct card *card,
@@ -137,6 +138,7 @@ static void replace_token(char *string, char *token, int where, int total);
 static void inp_add_series_resistor(struct card *deck);
 static void subckt_params_to_param(struct card *deck);
 static void inp_fix_temper_in_param(struct card *deck);
+static void inp_vdmos_model(struct card *deck);
 
 static char *inp_spawn_brace(char *s);
 
@@ -144,6 +146,7 @@ static char *inp_pathresolve(const char *name);
 static char *inp_pathresolve_at(char *name, char *dir);
 static char *search_plain_identifier(char *str, const char *identifier);
 void tprint(struct card *deck);
+static struct card *pspice_compat(struct card *newcard);
 
 struct inp_read_t
 { struct card *cc;
@@ -476,6 +479,33 @@ find_back_assignment(const char *p, const char *start)
 }
 
 
+/* Set a compatibility flag.
+Currently available are flags for:
+- ngspice (standard)
+- a commercial simulator
+- Spice3
+- all compatibility stuff
+*/
+static COMPATMODE_T
+ngspice_compat_mode(void)
+{
+    char behaviour[80];
+
+    if (cp_getvar("ngbehavior", CP_STRING, behaviour)) {
+        if (strcasecmp(behaviour, "all") == 0)
+            return COMPATMODE_ALL;
+        if (strcasecmp(behaviour, "hs") == 0)
+            return COMPATMODE_HS;
+        if (strcasecmp(behaviour, "ps") == 0)
+            return COMPATMODE_PS;
+        if (strcasecmp(behaviour, "spice3") == 0)
+            return COMPATMODE_SPICE3;
+    }
+
+    return COMPATMODE_ALL;
+}
+
+
 /*-------------------------------------------------------------------------
   Read the entire input file and return  a pointer to the first line of
   the linked list of 'card' records in data.  The pointer is stored in
@@ -546,6 +576,8 @@ inp_readall(FILE *fp, char *dir_name, bool comfile, bool intfile, bool *expr_w_t
 
         inp_remove_excess_ws(working);
 
+        inp_vdmos_model(working);
+
         comment_out_unused_subckt_models(working);
 
         subckt_params_to_param(working);
@@ -576,6 +608,7 @@ inp_readall(FILE *fp, char *dir_name, bool comfile, bool intfile, bool *expr_w_t
         if (inp_compat_mode != COMPATMODE_SPICE3) {
             /* Do all the compatibility stuff here */
             working = cc->nextcard;
+            inp_meas_current(working);
             /* E, G, L, R, C compatibility transformations */
             inp_compat(working);
             working = cc->nextcard;
@@ -614,26 +647,30 @@ inp_readall(FILE *fp, char *dir_name, bool comfile, bool intfile, bool *expr_w_t
         }
 
         if (ft_ngdebug) {
-            /*debug: print into file*/
             FILE *fd = fopen("debug-out.txt", "w");
-            struct card *t;
-            fprintf(fd, "**************** uncommented deck **************\n\n");
-            /* always print first line */
-            fprintf(fd, "%6d  %6d  %s\n", cc->linenum_orig, cc->linenum, cc->line);
-            /* here without out-commented lines */
-            for (t = cc->nextcard; t; t = t->nextcard) {
-                if (*(t->line) == '*')
-                    continue;
-                fprintf(fd, "%6d  %6d  %s\n", t->linenum_orig, t->linenum, t->line);
-            }
-            fprintf(fd, "\n****************** complete deck ***************\n\n");
-            /* now completely */
-            for (t = cc; t; t = t->nextcard)
-                fprintf(fd, "%6d  %6d  %s\n", t->linenum_orig, t->linenum, t->line);
-            fclose(fd);
+            if (fd) {
+                /*debug: print into file*/
+                struct card *t;
+                fprintf(fd, "**************** uncommented deck **************\n\n");
+                /* always print first line */
+                fprintf(fd, "%6d  %6d  %s\n", cc->linenum_orig, cc->linenum, cc->line);
+                /* here without out-commented lines */
+                for (t = cc->nextcard; t; t = t->nextcard) {
+                    if (*(t->line) == '*')
+                        continue;
+                    fprintf(fd, "%6d  %6d  %s\n", t->linenum_orig, t->linenum, t->line);
+                }
+                fprintf(fd, "\n****************** complete deck ***************\n\n");
+                /* now completely */
+                for (t = cc; t; t = t->nextcard)
+                    fprintf(fd, "%6d  %6d  %s\n", t->linenum_orig, t->linenum, t->line);
+                fclose(fd);
 
-            fprintf(stdout, "max line length %d, max subst. per line %d, number of lines %d\n",
-                    (int) max_line_length, no_braces, dynmaxline);
+                fprintf(stdout, "max line length %d, max subst. per line %d, number of lines %d\n",
+                    (int)max_line_length, no_braces, dynmaxline);
+            }
+            else
+                fprintf(stderr, "Warning: Cannot open file debug-out.txt for saving debug info\n");
         }
     }
 
@@ -670,15 +707,11 @@ inp_read(FILE *fp, int call_depth, char *dir_name, bool comfile, bool intfile)
     for (;;) {
         /* derive lines from circarray */
         if (intfile) {
-            char *p;
             buffer = circarray[cirlinecount++];
             if (!buffer) {
                 tfree(circarray);
                 break;
             }
-            p = skip_ws(buffer);
-            if (buffer < p)
-                memmove(buffer, p, strlen(p) + 1);
         }
         /* read lines from file fp */
         else {
@@ -847,6 +880,8 @@ inp_read(FILE *fp, int call_depth, char *dir_name, bool comfile, bool intfile)
             }
 
             if (newcard) {
+                if (inp_compat_mode == COMPATMODE_PS)
+                    newcard = pspice_compat(newcard);
                 int line_number_inc = 1;
                 end->nextcard = newcard;
                 /* Renumber the lines */
@@ -862,27 +897,94 @@ inp_read(FILE *fp, int call_depth, char *dir_name, bool comfile, bool intfile)
             (void) strncpy(buffer + 1, "end of: ", 8);
         }   /*  end of .include handling  */
 
-        /* loop through 'buffer' until end is reached.  Then test for
-           premature end.  If premature end is reached, spew
-           error and zap the line. */
+        /* loop through 'buffer' until end is reached. Make all letters lower
+         * case except for the commands given below. Special treatment for
+         * commands 'hardcopy' and 'plot', where all letters are made lower
+         * case except for the tokens following xlabel, ylabel and title.
+         * These tokens may contain spaces, if they are enclosed in single or
+         * double quotes. Single quotes are later on swallowed and disappear,
+         * double quotes are printed. */
         {
             char *s;
             /* no lower case letters for lines beginning with: */
-            if ( !ciprefix("write", buffer) &&
-                 !ciprefix("wrdata", buffer) &&
-                 !ciprefix(".lib", buffer) &&
-                 !ciprefix(".inc", buffer) &&
-                 !ciprefix("codemodel", buffer) &&
-                 !ciprefix("echo", buffer) &&
-                 !ciprefix("shell", buffer) &&
-                 !ciprefix("source", buffer) &&
-                 !ciprefix("load", buffer) &&
-                 !(ciprefix("set", buffer) && strstr(buffer, "sourcepath"))
+            if (!ciprefix("write", buffer) &&
+                !ciprefix("wrdata", buffer) &&
+                !ciprefix(".lib", buffer) &&
+                !ciprefix(".inc", buffer) &&
+                !ciprefix("codemodel", buffer) &&
+                !ciprefix("echo", buffer) &&
+                !ciprefix("shell", buffer) &&
+                !ciprefix("source", buffer) &&
+                !ciprefix("load", buffer) &&
+                !ciprefix("plot", buffer) &&
+                !ciprefix("hardcopy", buffer) &&
+                !(ciprefix("set", buffer) && strstr(buffer, "sourcepath"))
                 )
             {
-                /* lower case for all lines (exceptions see above!) */
+                /* lower case for all other lines */
                 for (s = buffer; *s && (*s != '\n'); s++)
                     *s = tolower_c(*s);
+            } else if (ciprefix("plot", buffer) || ciprefix("hardcopy", buffer)) {
+                /* lower case excluded for tokens following title, xlabel, ylabel.
+                 * tokens may contain spaces, then they have to be enclosed in quotes.
+                 * keywords and tokens have to be separated by spaces. */
+                int j;
+                char t = ' ';
+                for (s = buffer; *s && (*s != '\n'); s++) {
+                    *s = tolower_c(*s);
+                    if (ciprefix("title", s)) {
+                        /* jump beyond title */
+                        for (j = 0; j < 5; j++) {
+                            s++;
+                            *s = tolower_c(*s);
+                        }
+                        while (*s == ' ')
+                            s++;
+                        if (!s || (*s == '\n'))
+                            break;
+                        /* check if single quote is at start of token */
+                        else if (*s == '\'') {
+                            s++;
+                            t = '\'';
+                        }
+                        /* check if double quote is at start of token */
+                        else if (*s == '\"') {
+                            s++;
+                            t = '\"';
+                        }
+                        else
+                            t = ' ';
+                        /* jump beyond token without lower casing */
+                        while ((*s != '\n') && (*s != t))
+                            s++;
+                    }
+                    else if (ciprefix("xlabel", s) || ciprefix("ylabel", s)) {
+                        /* jump beyond xlabel, ylabel */
+                        for (j = 0; j < 6; j++) {
+                            s++;
+                            *s = tolower_c(*s);
+                        }
+                        while (*s == ' ')
+                            s++;
+                        if (!s || (*s == '\n'))
+                            break;
+                        /* check if single quote is at start of token */
+                        else if (*s == '\'') {
+                            s++;
+                            t = '\'';
+                        }
+                        /* check if double quote is at start of token */
+                        else if (*s == '\"') {
+                            s++;
+                            t = '\"';
+                        }
+                        else
+                            t = ' ';
+                        /* jump beyond token without lower casing */
+                        while ((*s != '\n') && (*s != t))
+                            s++;
+                    }
+                }
             } else {
                 char *p;
                 if ( (p=strstr(buffer, "sourcepath"))) {
@@ -2454,7 +2556,7 @@ expand_section_ref(struct card *c, char *dir_name)
         /* insert the library section definition into `c' */
         {
             struct card *t = section_def;
-            for (; t; t=t->nextcard) {
+            for (; t; t = t->nextcard) {
                 c = insert_new_line(c, copy(t->line), t->linenum, t->linenum_orig);
                 if (t == section_def) {
                     c->line[0] = '*';
@@ -2635,9 +2737,6 @@ found_mult_param(int num_params, char *param_names[])
 /* If a subcircuit invocation (X-line) is found, which contains the
    multiplier parameter 'm', m is added to all lines inside
    the corresponding subcircuit except of some excluded in the code below
-   (FIXME: It may be necessary to exclude more of them, at least
-   for all devices that are not supporting the 'm' parameter).
-
    Function is called from inp_fix_inst_calls_for_numparam() */
 
 static int
@@ -2665,8 +2764,8 @@ inp_fix_subckt_multiplier(struct names *subckt_w_params, struct card *subckt_car
          card && !ciprefix(".ends", card->line);
          card = card->nextcard) {
         char *curr_line = card->line;
-        /* no 'm' for B, V, E, H or comment line */
-        if (strchr("*bveh", curr_line[0]))
+        /* no 'm' for comment line, B, V, E, H and some others that are not using 'm' in their model description */
+        if (strchr("*bvehaknopstuwy", curr_line[0]))
             continue;
         /* no 'm' for model cards */
         if (ciprefix(".model", curr_line))
@@ -2681,6 +2780,24 @@ inp_fix_subckt_multiplier(struct names *subckt_w_params, struct card *subckt_car
 }
 
 
+/* a bogus search for a .subckt with given name,
+ *   which does not honour scoping rules
+ */
+
+static struct card *
+bogus_find_subckt(struct card *d, const char *subckt_name)
+{
+    const size_t len = strlen(subckt_name);
+    for (; d; d = d->nextcard)
+        if (ciprefix(".subckt", d->line)) {
+            const char *n = skip_ws(skip_non_ws(d->line));
+            if ((strncmp(n, subckt_name, len) == 0) && (!n[len] || isspace_c(n[len])))
+                break;
+        }
+    return d;
+}
+
+
 static void
 inp_fix_inst_calls_for_numparam(struct names *subckt_w_params, struct card *deck)
 {
@@ -2689,7 +2806,6 @@ inp_fix_inst_calls_for_numparam(struct names *subckt_w_params, struct card *deck
     char *subckt_param_values[1000];
     char *inst_param_names[1000];
     char *inst_param_values[1000];
-    char name_w_space[1000];
     int  i;
 
     // first iterate through instances and find occurences where 'm' multiplier needs to be
@@ -2708,17 +2824,8 @@ inp_fix_inst_calls_for_numparam(struct names *subckt_w_params, struct card *deck
                 struct card *d, *p = NULL;
 
                 // iterate through the deck to find the subckt (last one defined wins)
-                for (d = deck; d; d = d->nextcard) {
-                    char *subckt_line = d->line;
-                    if (ciprefix(".subckt", subckt_line)) {
-                        subckt_line = skip_non_ws(subckt_line);
-                        subckt_line = skip_ws(subckt_line);
-
-                        sprintf(name_w_space, "%s ", subckt_name);
-                        if (strncmp(subckt_line, name_w_space, strlen(name_w_space)) == 0)
-                            p = d;
-                    }
-                }
+                for (d = deck; (d = bogus_find_subckt(d, subckt_name)) != NULL; d = d->nextcard)
+                    p = d;
 
                 if (p) {
                     int num_subckt_params = inp_get_params(p->line, subckt_param_names, subckt_param_values);
@@ -2754,60 +2861,52 @@ inp_fix_inst_calls_for_numparam(struct names *subckt_w_params, struct card *deck
             if (find_name(subckt_w_params, subckt_name)) {
                 struct card *d;
 
-                /* find .subckt line */
-
-                sprintf(name_w_space, "%s ", subckt_name);
-
-                for (d = deck; d; d = d->nextcard) {
+                for (d = deck; (d = bogus_find_subckt(d, subckt_name)) != NULL; d = d->nextcard) {
                     char *subckt_line = d->line;
-                    if (ciprefix(".subckt", subckt_line)) {
-                        subckt_line = skip_non_ws(subckt_line);
-                        subckt_line = skip_ws(subckt_line);
+                    subckt_line = skip_non_ws(subckt_line);
+                    subckt_line = skip_ws(subckt_line);
 
-                        if (strncmp(subckt_line, name_w_space, strlen(name_w_space)) == 0) {
-                            int num_subckt_params = inp_get_params(subckt_line, subckt_param_names, subckt_param_values);
-                            int num_inst_params   = inp_get_params(inst_line, inst_param_names, inst_param_values);
+                    int num_subckt_params = inp_get_params(subckt_line, subckt_param_names, subckt_param_values);
+                    int num_inst_params   = inp_get_params(inst_line, inst_param_names, inst_param_values);
 
-                            // make sure that if have inst params that one matches subckt
-                            if (num_inst_params != 0) {
-                                bool found_param_match = FALSE;
-                                int j, k;
+                    // make sure that if have inst params that one matches subckt
+                    if (num_inst_params != 0) {
+                        bool found_param_match = FALSE;
+                        int j, k;
 
-                                for (j = 0; j < num_inst_params; j++) {
-                                    for (k = 0; k < num_subckt_params; k++)
-                                        if (strcmp(subckt_param_names[k], inst_param_names[j]) == 0) {
-                                            found_param_match = TRUE;
-                                            break;
-                                        }
-                                    if (found_param_match)
-                                        break;
+                        for (j = 0; j < num_inst_params; j++) {
+                            for (k = 0; k < num_subckt_params; k++)
+                                if (strcmp(subckt_param_names[k], inst_param_names[j]) == 0) {
+                                    found_param_match = TRUE;
+                                    break;
                                 }
+                            if (found_param_match)
+                                break;
+                        }
 
-                                if (!found_param_match) {
-                                    // comment out .subckt and continue
-                                    while (d != NULL && !ciprefix(".ends", d->line)) {
-                                        *(d->line) = '*';
-                                        d = d->nextcard;
-                                    }
-                                    *(d->line) = '*';
-                                    continue;
-                                }
+                        if (!found_param_match) {
+                            // comment out .subckt and continue
+                            while (d != NULL && !ciprefix(".ends", d->line)) {
+                                *(d->line) = '*';
+                                d = d->nextcard;
                             }
-
-                            c->line = inp_fix_inst_line(inst_line, num_subckt_params, subckt_param_names, subckt_param_values, num_inst_params, inst_param_names, inst_param_values);
-                            for (i = 0; i < num_subckt_params; i++) {
-                                tfree(subckt_param_names[i]);
-                                tfree(subckt_param_values[i]);
-                            }
-
-                            for (i = 0; i < num_inst_params; i++) {
-                                tfree(inst_param_names[i]);
-                                tfree(inst_param_values[i]);
-                            }
-
-                            break;
+                            *(d->line) = '*';
+                            continue;
                         }
                     }
+
+                    c->line = inp_fix_inst_line(inst_line, num_subckt_params, subckt_param_names, subckt_param_values, num_inst_params, inst_param_names, inst_param_values);
+                    for (i = 0; i < num_subckt_params; i++) {
+                        tfree(subckt_param_names[i]);
+                        tfree(subckt_param_values[i]);
+                    }
+
+                    for (i = 0; i < num_inst_params; i++) {
+                        tfree(inst_param_names[i]);
+                        tfree(inst_param_values[i]);
+                    }
+
+                    break;
                 }
             }
 
@@ -4239,7 +4338,7 @@ inp_compat(struct card *card)
 {
     char *str_ptr, *cut_line, *title_tok, *node1, *node2;
     char *out_ptr, *exp_ptr, *beg_ptr, *end_ptr, *copy_ptr, *del_ptr;
-    char *xline;
+    char *xline, *x2line, *x3line, *x4line;
     size_t xlen, i, pai = 0, paui = 0, ii;
     char *ckt_array[100];
 
@@ -4298,84 +4397,87 @@ inp_compat(struct card *card)
                         title_tok, node1, node2, title_tok);
                 // skip "table"
                 cut_line = skip_ws(cut_line);
-                if (!ciprefix("table", cut_line)) {
-                    fprintf(stderr, "Error: bad syntax in line %d\n  %s\n",
-                            card->linenum_orig, card->line);
-                    controlled_exit(EXIT_BAD);
-                }
-                cut_line += 5;
-                // compatibility, allow table = {expr} {pairs}
-                if (*cut_line == '=')
-                    *cut_line++ = ' ';
-                // get the expression
-                str_ptr =  gettok_char(&cut_line, '{', FALSE, FALSE);
-                expression = gettok_char(&cut_line, '}', TRUE, TRUE); /* expression */
-                if (!expression || !str_ptr) {
-                    fprintf(stderr, "Error: bad syntax in line %d\n  %s\n",
-                            card->linenum_orig, card->line);
-                    controlled_exit(EXIT_BAD);
-                }
-                tfree(str_ptr);
-                /* remove '{' and '}' from expression */
-                if ((str_ptr = strchr(expression, '{')) != NULL)
-                    *str_ptr = ' ';
-                if ((str_ptr = strchr(expression, '}')) != NULL)
-                    *str_ptr = ' ';
-                /* cut_line may now have a '=', if yes, it will have '{' and '}'
-                   (braces around token after '=') */
-                if ((str_ptr = strchr(cut_line, '=')) != NULL)
-                    *str_ptr = ' ';
-                if ((str_ptr = strchr(cut_line, '{')) != NULL)
-                    *str_ptr = ' ';
-                if ((str_ptr = strchr(cut_line, '}')) != NULL)
-                    *str_ptr = ' ';
-                /* get first two numbers to establish extrapolation */
-                str_ptr = cut_line;
-                ffirstno = gettok_node(&cut_line);
-                if (!ffirstno) {
-                    fprintf(stderr, "Error: bad syntax in line %d\n  %s\n",
-                            card->linenum_orig, card->line);
-                    controlled_exit(EXIT_BAD);
-                }
-                firstno = copy(ffirstno);
-                fnumber = INPevaluate(&ffirstno, &nerror, TRUE);
-                secondno = gettok_node(&cut_line);
-                midline = cut_line;
-                cut_line = strrchr(str_ptr, '(');
-                if (!cut_line) {
-                    fprintf(stderr, "Error: bad syntax in line %d (missing parentheses)\n  %s\n",
-                            card->linenum_orig, card->line);
-                    controlled_exit(EXIT_BAD);
-                }
-                /* replace '(' with ',' and ')' with ' ' */
-                for (; *str_ptr; str_ptr++)
-                    if (*str_ptr == '(')
-                        *str_ptr = ',';
-                    else if (*str_ptr == ')')
+                if (ciprefix("table", cut_line)) {
+                    /* a regular TABLE line */
+                    cut_line += 5;
+                    // compatibility, allow table = {expr} {pairs}
+                    if (*cut_line == '=')
+                        *cut_line++ = ' ';
+                    // get the expression
+                    str_ptr =  gettok_char(&cut_line, '{', FALSE, FALSE);
+                    expression = gettok_char(&cut_line, '}', TRUE, TRUE); /* expression */
+                    if (!expression || !str_ptr) {
+                        fprintf(stderr, "Error: bad syntax in line %d\n  %s\n",
+                                card->linenum_orig, card->line);
+                        controlled_exit(EXIT_BAD);
+                    }
+                    tfree(str_ptr);
+                    /* remove '{' and '}' from expression */
+                    if ((str_ptr = strchr(expression, '{')) != NULL)
                         *str_ptr = ' ';
-                /* scan for last two numbers */
-                lastno = gettok_node(&cut_line);
-                lnumber = INPevaluate(&lastno, &nerror, FALSE);
-                /* check for max-min and take half the difference for delta */
-                delta = (lnumber-fnumber)/2.;
-                lastlastno = gettok_node(&cut_line);
-                if (!secondno || (*midline == '\0') || (delta <= 0.) || !lastlastno) {
-                    fprintf(stderr, "Error: bad syntax in line %d\n  %s\n",
-                            card->linenum_orig, card->line);
-                    controlled_exit(EXIT_BAD);
+                    if ((str_ptr = strchr(expression, '}')) != NULL)
+                        *str_ptr = ' ';
+                    /* cut_line may now have a '=', if yes, it will have '{' and '}'
+                       (braces around token after '=') */
+                    if ((str_ptr = strchr(cut_line, '=')) != NULL)
+                        *str_ptr = ' ';
+                    if ((str_ptr = strchr(cut_line, '{')) != NULL)
+                        *str_ptr = ' ';
+                    if ((str_ptr = strchr(cut_line, '}')) != NULL)
+                        *str_ptr = ' ';
+                    /* get first two numbers to establish extrapolation */
+                    str_ptr = cut_line;
+                    ffirstno = gettok_node(&cut_line);
+                    if (!ffirstno) {
+                        fprintf(stderr, "Error: bad syntax in line %d\n  %s\n",
+                                card->linenum_orig, card->line);
+                        controlled_exit(EXIT_BAD);
+                    }
+                    firstno = copy(ffirstno);
+                    fnumber = INPevaluate(&ffirstno, &nerror, TRUE);
+                    secondno = gettok_node(&cut_line);
+                    midline = cut_line;
+                    cut_line = strrchr(str_ptr, '(');
+                    if (!cut_line) {
+                        fprintf(stderr, "Error: bad syntax in line %d (missing parentheses)\n  %s\n",
+                                card->linenum_orig, card->line);
+                        controlled_exit(EXIT_BAD);
+                    }
+                    /* replace '(' with ',' and ')' with ' ' */
+                    for (; *str_ptr; str_ptr++)
+                        if (*str_ptr == '(')
+                            *str_ptr = ',';
+                        else if (*str_ptr == ')')
+                            *str_ptr = ' ';
+                    /* scan for last two numbers */
+                    lastno = gettok_node(&cut_line);
+                    lnumber = INPevaluate(&lastno, &nerror, FALSE);
+                    /* check for max-min and take half the difference for delta */
+                    delta = (lnumber-fnumber)/2.;
+                    lastlastno = gettok_node(&cut_line);
+                    if (!secondno || (*midline == '\0') || (delta <= 0.) || !lastlastno) {
+                        fprintf(stderr, "Error: bad syntax in line %d\n  %s\n",
+                                card->linenum_orig, card->line);
+                        controlled_exit(EXIT_BAD);
+                    }
+                    ckt_array[1] = tprintf("b%s %s_int1 0 v = pwl(%s, %e, %s, %s, %s, %s, %e, %s)",
+                            title_tok, title_tok, expression, fnumber-delta, secondno, firstno, secondno,
+                            midline, lnumber + delta, lastlastno);
+
+                    // comment out current variable e line
+                    *(card->line) = '*';
+                    // insert new B source line immediately after current line
+                    for (i = 0; i < 2; i++)
+                        card = insert_new_line(card, ckt_array[i], 0, 0);
+
+                    tfree(firstno);
+                    tfree(lastlastno);
+
                 }
-                ckt_array[1] = tprintf("b%s %s_int1 0 v = pwl(%s, %e, %s, %s, %s, %s, %e, %s)",
-                        title_tok, title_tok, expression, fnumber-delta, secondno, firstno, secondno,
-                        midline, lnumber + delta, lastlastno);
-
-                // comment out current variable e line
-                *(card->line) = '*';
-                // insert new B source line immediately after current line
-                for (i = 0; i < 2; i++)
-                    card = insert_new_line(card, ckt_array[i], 0, 0);
-
-                tfree(firstno);
-                tfree(lastlastno);
+                else {
+                    /* not used */
+                    tfree(ckt_array[0]);
+                }
                 tfree(title_tok);
                 tfree(node1);
                 tfree(node2);
@@ -4533,7 +4635,9 @@ inp_compat(struct card *card)
                     card = insert_new_line(card, ckt_array[i], 0, 0);
 
                 tfree(firstno);
+                tfree(secondno);
                 tfree(lastlastno);
+                tfree(expression);
                 tfree(title_tok);
                 tfree(node1);
                 tfree(node2);
@@ -4731,15 +4835,40 @@ inp_compat(struct card *card)
                         tc2 = atof(tc2_ptr+1);
                 }
             }
+            /* white noise model by x2line, x3line, x4line */
             if ((tc1_ptr == NULL) && (tc2_ptr == NULL)) {
                 xline = tprintf("b%s %s %s i = v(%s, %s)/(%s)", title_tok, node1, node2,
                         node1, node2, equation);
+                x2line = tprintf("b%s_1 %s %s i = i(v%s_3)/sqrt(%s)",
+                                 title_tok, node1, node2,
+                                 title_tok,
+                                 equation);
+                x3line = tprintf("r%s_2 %s_3 0 1.0",
+                                 title_tok, title_tok);
+                x4line = tprintf("v%s_3 %s_3 0 0",
+                                 title_tok, title_tok);
             } else if (tc2_ptr == NULL) {
                 xline = tprintf("b%s %s %s i = v(%s, %s)/(%s) tc1=%15.8e reciproctc=1", title_tok, node1, node2,
                         node1, node2, equation, tc1);
+                x2line = tprintf("b%s_1 %s %s i = i(v%s_3)/sqrt(%s)",
+                                 title_tok, node1, node2,
+                                 title_tok,
+                                 equation);
+                x3line = tprintf("r%s_2 %s_3 0 1.0 tc1=%15.8e",
+                                 title_tok, title_tok, tc1);
+                x4line = tprintf("v%s_3 %s_3 0 0",
+                                 title_tok, title_tok);
             } else {
                 xline = tprintf("b%s %s %s i = v(%s, %s)/(%s) tc1=%15.8e tc2=%15.8e reciproctc=1", title_tok, node1, node2,
                         node1, node2, equation, tc1, tc2);
+                x2line = tprintf("b%s_1 %s %s i = i(v%s_3)/sqrt(%s)",
+                                 title_tok, node1, node2,
+                                 title_tok,
+                                 equation);
+                x3line = tprintf("r%s_2 %s_3 0 1.0 tc1=%15.8e tc2=%15.8e",
+                                 title_tok, title_tok, tc1, tc2);
+                x4line = tprintf("v%s_3 %s_3 0 0",
+                                 title_tok, title_tok);
             }
             tc1_ptr = NULL;
             tc2_ptr = NULL;
@@ -4748,6 +4877,11 @@ inp_compat(struct card *card)
             *(card->line)   = '*';
             // insert new B source line immediately after current line
             card = insert_new_line(card, xline, 0, 0);
+            if (x2line) {
+                card = insert_new_line(card, x2line, 0, 0);
+                card = insert_new_line(card, x3line, 0, 0);
+                card = insert_new_line(card, x4line, 0, 0);
+            }
 
             tfree(title_tok);
             tfree(node1);
@@ -5187,8 +5321,9 @@ replace_token(char *string, char *token, int wherereplace, int total)
 }
 
 
-/* lines for B sources: no parsing in numparam code, just replacement of parameters.
-   Parsing done in B source parser.
+/* lines for B sources (except for pwl lines): no parsing in numparam code,
+   just replacement of parameters. pwl lines are still handled in numparam.
+   Parsing for all other B source lines are done in the B source parser.
    To achive this, do the following:
    Remove all '{' and '}' --> no parsing of equations in numparam
    Place '{' and '}' directly around all potential parameters,
@@ -5222,6 +5357,9 @@ inp_bsource_compat(struct card *card)
             /* remove white spaces of everything inside {}*/
             card->line = inp_remove_ws(card->line);
             curr_line = card->line;
+            /* exclude special pwl lines */
+            if (strstr(curr_line, "=pwl("))
+                continue;
             /* store starting point for later parsing, beginning of {expression} */
             equal_ptr = strchr(curr_line, '=');
             /* check for errors */
@@ -6067,4 +6205,925 @@ inp_quote_params(struct card *c, struct card *end_c, struct dependency *deps, in
             }
         }
     }
+}
+
+
+/* VDMOS special:
+   Check for 'vdmos' in .model line.
+   check if 'pchan', then add p to vdmos and ignore 'pchan'.
+   If no 'pchan' is found, add n to vdmos.
+   Ignore annotations on Vds, Ron, Qg, and mfg.
+   Assemble all other tokens in a wordlist, and flatten it
+   to become the new .model line.
+*/
+static void
+inp_vdmos_model(struct card *deck)
+{
+    struct card *card;
+    for (card = deck; card; card = card->nextcard) {
+
+        char *curr_line, *cut_line, *token, *new_line;
+        wordlist *wl = NULL, *wlb;
+
+        curr_line = cut_line = card->line;
+
+        if (ciprefix(".model", curr_line) && strstr(curr_line, "vdmos")) {
+            cut_line = strstr(curr_line, "vdmos");
+            wl_append_word(&wl, &wl, copy_substring(curr_line, cut_line));
+            wlb = wl;
+            if (strstr(cut_line, "pchan")) {
+                wl_append_word(NULL, &wl, "vdmosp (");
+            }
+            else {
+                wl_append_word(NULL, &wl, "vdmosn (");
+            }
+            cut_line = cut_line + 5;
+
+            cut_line = skip_ws(cut_line);
+            if (*cut_line == '(')
+                cut_line = cut_line + 1;
+            new_line = NULL;
+            while (cut_line && *cut_line) {
+                token = gettok_noparens(&cut_line);
+                if (!ciprefix("pchan", token) && !ciprefix("ron=", token) && !ciprefix("vds=", token) &&
+                        !ciprefix("qg=", token) && !ciprefix("mfg=", token) && !ciprefix("nchan", token))
+                    wl_append_word(NULL, &wl, token);
+                if (*cut_line == ')') {
+                    wl_append_word(NULL, &wl, ")");
+                    break;
+                }
+            }
+            new_line = wl_flatten(wlb);
+            tfree(card->line);
+            card->line = new_line;
+        }
+    }
+}
+
+
+/* storage for devices which get voltage source added */
+struct replace_currm
+{
+    struct card *s_start;
+    struct card *cline;
+    char *rtoken;
+    struct replace_currm *next;
+};
+
+/* check if fourth token of sname starts with POLY */
+static bool
+is_poly_source(char *sname)
+{
+    char *nstr = nexttok(sname);
+    nstr = nexttok(nstr);
+    nstr = nexttok(nstr);
+    if (ciprefix("POLY", nstr))
+        return TRUE;
+    else
+        return FALSE;
+}
+
+/* Measure current in node 1 of all devices, e.g. I, B, F, G.
+   I(V...) will be ignored, I(E...) and I(H...) will be undone if
+   they are simple linear sources, however E nonlinear voltage
+   source will be converted later to B source,
+   therefore we need to add current measurement here.
+   First find all ocurrencies of i(XYZ), store their cards, then
+   search for XYZ, but only within respective subcircuit, or if
+   all happens at top level. Other hierarchy is ignored for now.
+   Replace I(XYZ) bx I(V_XYZ), add voltage source V_XYZ with
+   suitable extra nodes.
+*/
+static void
+inp_meas_current(struct card *deck)
+{
+    struct card *card, *subc_start = NULL, *subc_prev = NULL;
+    struct replace_currm *new_rep, *act_rep = NULL, *rep = NULL;
+    char *s, *t, *u, *v, *w;
+    int skip_control = 0, subs = 0;
+
+    /* scan through deck and find i(xyz), replace by i(v_xyz) */
+    for (card = deck; card; card = card->nextcard) {
+
+        char *curr_line = card->line;
+
+        /* exclude any command inside .control ... .endc */
+        if (ciprefix(".control", curr_line)) {
+            skip_control++;
+            continue;
+        }
+        else if (ciprefix(".endc", curr_line)) {
+            skip_control--;
+            continue;
+        }
+        else if (skip_control > 0) {
+            continue;
+        }
+
+        if (*curr_line == '*')
+            continue;
+
+        if (*curr_line == '.') {
+            if (ciprefix(".subckt", curr_line)) {
+                subs++;
+                subc_prev = subc_start;
+                subc_start = card;
+            }
+            else if (ciprefix(".ends", curr_line)) {
+                subs--;
+                subc_start = subc_prev;
+            }
+            else
+                continue;
+        }
+
+        if (!strstr(curr_line, "i("))
+            continue;
+
+        s = v = w = stripWhiteSpacesInsideParens(curr_line);
+        while (s) {
+            /* i( may occur more than once in a line */
+            s = u = strstr(s, "i(");
+            /* we have found it, but not (in error) at the beginning of the line */
+            if (s && s > v) {
+                /* '{' if at beginning of expression, '=' possible in B-line */
+                if (is_arith_char(s[-1]) || s[-1] == '{' || s[-1] == '=') {
+                    s += 2;
+                    if (*s == 'v') {
+                        // printf("i(v...) found in\n%s\n not converted!\n\n", curr_line);
+                        continue;
+                    }
+                    else {
+                        char *beg_str, *new_str;
+                        get_r_paren(&u);
+                        /* token containing name of devices to be measured */
+                        t = copy_substring(s, --u);
+                        if (ft_ngdebug)
+                            printf("i(%s) found in\n%s\n\n", t, v);
+
+                        /* new entry to the end of struct rep */
+                        new_rep = TMALLOC(struct replace_currm, 1);
+                        new_rep->s_start = subc_start;
+                        new_rep->next = NULL;
+                        new_rep->cline = card;
+                        new_rep->rtoken = t;
+                        if (act_rep) {
+                            act_rep->next = new_rep;
+                            act_rep = act_rep->next;
+                        }
+                        else
+                            rep = act_rep = new_rep;
+                        /* change line, convert i(XXX) to i(v_XXX) */
+                        beg_str = copy_substring(v, s);
+                        new_str = tprintf("%s%s%s", beg_str, "v_", s);
+                        if (ft_ngdebug)
+                            printf("converted to\n%s\n\n", new_str);
+                        tfree(card->line);
+                        card->line = s = v = new_str;
+                        s++;
+                        tfree(beg_str);
+                    }
+                }
+                else
+                    s++;
+            }
+        }
+        tfree(w);
+    }
+
+    /* return if we did not find any i( */
+    if (rep == NULL)
+      return;
+
+    /* scan through all the devices, search for xyz, modify node 1 by adding _vmeas,
+       add a line with zero voltage v_xyz, having original node 1 and modified node 1.
+       Do this within the top level or the same level of subcircuit only. */
+    new_rep = rep;
+    for (; rep; rep = rep->next) {
+        card = rep->s_start;
+        subs = 0;
+        if (card)
+            card = card->nextcard;
+        else
+            card = deck;
+        for (; card; card = card->nextcard) {
+            char *tok, *new_tok, *node1, *new_line;
+            char *curr_line = card->line;
+            /* exclude any command inside .control ... .endc */
+            if (ciprefix(".control", curr_line)) {
+                skip_control++;
+                continue;
+            }
+            else if (ciprefix(".endc", curr_line)) {
+                skip_control--;
+                continue;
+            }
+            else if (skip_control > 0) {
+                continue;
+            }
+
+            if (*curr_line == '*')
+                continue;
+
+            if (*curr_line == '.') {
+                if (ciprefix(".subckt", curr_line))
+                    subs++;
+                else if (ciprefix(".ends", curr_line))
+                    subs--;
+                else
+                    continue;
+            }
+            if (subs > 0)
+                continue;
+            /* We are at now top level or in top level of subcircuit
+               where i(xyz) has been found */
+            tok = gettok(&curr_line);
+            /* done when end of subcircuit is reached */
+            if (eq(".ends", tok) && rep->s_start)
+                break;
+            if (eq(rep->rtoken, tok)) {
+                /* special treatment if we have an e (VCVS) or h (CCVS) source:
+                check if it is a simple linear source, if yes, don't do a
+                replacement, instead undo the already done name conversion */
+                if (((tok[0] == 'e') || (tok[0] == 'h')) && !strchr(curr_line, '=') && !is_poly_source(card->line)) {
+                    /* simple linear e source */
+                    char *searchstr = tprintf("i(v_%s)", tok);
+                    char *thisline = rep->cline->line;
+                    char *findstr = strstr(thisline, searchstr);
+                    while (findstr) {
+                        if (prefix(searchstr, findstr))
+                            memcpy(findstr, "  i(", 4);
+                        findstr = strstr(thisline, searchstr);
+                        if (ft_ngdebug)
+                            printf("i(%s) moved back to i(%s) in\n%s\n\n", searchstr, tok, rep->cline->line);
+                    }
+                    tfree(searchstr);
+                    continue;
+                }
+                node1 = gettok(&curr_line);
+                /* Add _vmeas only once to first device node.
+                   Continue if we already have modified device "tok" */
+                if (!strstr(node1, "_vmeas")) {
+                    new_line = tprintf("%s %s_vmeas %s", tok, node1, curr_line);
+                    tfree(card->line);
+                    card->line = new_line;
+                }
+
+                new_tok = tprintf("v_%s", tok);
+                /* We have already added a line v_xyz to the deck */
+                if (!ciprefix(new_tok, card->nextcard->line)) {
+                    /* add new line */
+                    new_line = tprintf("%s %s %s_vmeas 0", new_tok, node1, node1);
+                    /* insert new_line after card->line */
+                    insert_new_line(card, new_line, card->linenum + 1, 0);
+                }
+                tfree(new_tok);
+                tfree(node1);
+            }
+            tfree(tok);
+        }
+    }
+
+    /* free rep */
+    while (new_rep) {
+        struct replace_currm *repn = new_rep->next;
+        tfree(new_rep->rtoken);
+        tfree(new_rep);
+        new_rep = repn;
+    }
+}
+
+/* replace the E source TABLE function by a B source pwl
+   (used by ST OpAmps and comparators).
+   E_RO_3 VB_3 VB_4  VALUE={ TABLE( V(VCCP,VCCN), 2 , 35 , 3.3 , 15 , 5 , 10 )*I(VreadIo)}
+   will become
+   BE_RO_3_1 TABLE_NEW_1 0 v = pwl( V(VCCP,VCCN), 2 , 35 , 3.3 , 15 , 5 , 10 )
+   E_RO_3 VB_3 VB_4  VALUE={ V(TABLE_NEW_1)*I(VreadIo)}
+*/
+static void
+replace_table(struct card *startcard)
+{
+    struct card *card;
+    static int numb = 0;
+    for (card = startcard; card; card = card->nextcard) {
+        char *cut_line = card->line;
+        if (*cut_line == 'e') {
+            char *valp = strstr(cut_line, "value={");
+            if (valp) {
+                char *ftablebeg = strstr(cut_line, "table(");
+                while (ftablebeg) {
+                    /* get the beginning of the line */
+                    char *begline = copy_substring(cut_line, ftablebeg);
+                    /* get the table function */
+                    char *tabfun = gettok_char(&ftablebeg, ')', TRUE, TRUE);
+                    /* the new e line */
+                    char *neweline = tprintf("%s v(table_new_%d)%s", begline, numb, ftablebeg);
+                    char *newbline = tprintf("btable_new_%d table_new_%d 0 v=pwl%s", numb, numb, tabfun+5);
+                    numb++;
+                    tfree(tabfun);
+                    tfree(begline);
+                    tfree(card->line);
+                    card->line = cut_line = neweline;
+                    insert_new_line(card, newbline, 0, 0);
+                    /* read next TABLE function in cut_line */
+                    ftablebeg = strstr(cut_line, "table(");
+                }
+                continue;
+            }
+        }
+    }
+}
+
+/* find the model requested by ako:model and do the replacement */
+static struct card*
+find_model(struct card *startcard, struct card *changecard, char *searchname, char *newmname, char *newmtype, char *endstr)
+{
+    struct card *nomod, *returncard = changecard;
+    char *origmname, *origmtype;
+    char *beginline = startcard->line;
+    if (ciprefix(".subckt", beginline))
+        startcard = startcard->nextcard;
+
+    int nesting2 = 0;
+    for (nomod = startcard; nomod; nomod = nomod->nextcard) {
+        char *origmodline = nomod->line;
+        if (ciprefix(".subckt", origmodline))
+            nesting2++;
+        if (ciprefix(".ends", origmodline))
+            nesting2--;
+        /* skip any subcircuit */
+        if (nesting2 > 0)
+            continue;
+        if (nesting2 == -1) {
+            returncard = changecard;
+            break;
+        }
+        if (ciprefix(".model", origmodline)) {
+            origmodline = nexttok(origmodline);
+            origmname = gettok(&origmodline);
+            origmtype = gettok_noparens(&origmodline);
+            if (cieq(origmname, searchname)) {
+                if (!eq(origmtype, newmtype)) {
+                    fprintf(stderr, "Error: Original (%s) and new (%s) type for AKO model disagree\n", origmtype, newmtype);
+                    controlled_exit(1);
+                }
+                /* we have got it */
+                char *newmodcard = tprintf(".model %s %s %s%s", newmname, newmtype, origmodline, endstr);
+                char *tmpstr = strstr(newmodcard, ")(");
+                if (tmpstr) {
+                    tmpstr[0] = ' ';
+                    tmpstr[1] = ' ';
+                }
+                tfree(changecard->line);
+                changecard->line = newmodcard;
+                tfree(origmname);
+                tfree(origmtype);
+                returncard = NULL;
+                break;
+            }
+            tfree(origmname);
+            tfree(origmtype);
+        }
+        else
+            returncard = changecard;
+    }
+    return returncard;
+}
+
+/* do the .model replacement required by ako (a kind of)
+* PSPICE does not support ested .subckt definitions, so
+* a simple structure is needed: search for ako:modelname,
+* then for modelname in the subcircuit or in the top level.
+* .model qorig npn (BF=48 IS=2e-7)
+* .model qbip1 ako:qorig NPN (BF=60 IKF=45m)
+* after the replacement we have
+* .model qbip1 NPN (BF=48 IS=2e-7 BF=60 IKF=45m)
+* and we benefit from the fact that if parameters have
+* doubled, the last entry of a parameter (e.g. BF=60)
+* overwrites the previous one (BF=48).
+*/
+static struct card*
+ako_model(struct card *startcard)
+{
+    char *newmname, *newmtype;
+    struct card *card, *returncard = NULL, *subcktcard = NULL;
+    for (card = startcard; card; card = card->nextcard) {
+        char *akostr, *searchname;
+        char *cut_line = card->line;
+        if (ciprefix(".subckt", cut_line))
+            subcktcard = card;
+        else if (ciprefix(".ends", cut_line))
+            subcktcard = NULL;
+        if (ciprefix(".model", cut_line) &&
+            ((akostr = strstr(cut_line, "ako:")) != NULL) && isspace_c(akostr[-1])) {
+            akostr += 4;
+            searchname = gettok(&akostr);
+            cut_line = nexttok(cut_line);
+            newmname = gettok(&cut_line);
+            newmtype = gettok_noparens(&akostr);
+            /* find the model and do the replacement */
+            if (subcktcard)
+                returncard = find_model(subcktcard, card, searchname, newmname, newmtype, akostr);
+            if(returncard || !subcktcard)
+                returncard = find_model(startcard, card, searchname, newmname, newmtype, akostr);
+            tfree(searchname);
+            tfree(newmname);
+            tfree(newmtype);
+            /* replacement not possible, bail out */
+            if (returncard)
+                break;
+        }
+    }
+    return returncard;
+}
+
+/* in       out
+   von      cntl_on
+   voff     cntl_off
+   ron      r_on
+   roff     r_off
+*/
+int
+rep_spar(char *inpar[4])
+{
+    int i;
+    for (i = 0; i < 4; i++) {
+        char *t, *strend;
+        char *tok = inpar[i];
+        if ((t = strstr(tok, "von")) != NULL) {
+            strend = copy(t + 1);
+            tfree(inpar[i]);
+            inpar[i] = tprintf("cntl_%s", strend);
+            tfree(strend);
+        }
+        else if ((t = strstr(tok, "voff")) != NULL) {
+            strend = copy(t + 1);
+            tfree(inpar[i]);
+            inpar[i] = tprintf("cntl_%s", strend);
+            tfree(strend);
+        }
+        else if ((t = strstr(tok, "ron")) != NULL) {
+            strend = copy(t + 1);
+            tfree(inpar[i]);
+            inpar[i] = tprintf("r_%s", strend);
+            tfree(strend);
+        }
+        else if ((t = strstr(tok, "roff")) != NULL) {
+            strend = copy(t + 1);
+            tfree(inpar[i]);
+            inpar[i] = tprintf("r_%s", strend);
+            tfree(strend);
+        }
+        else {
+            fprintf(stderr, "Bad vswitch parameter %s\n", tok);
+            return 1;
+        }
+    }
+    return 0;
+}
+
+struct vsmodels {
+    char *modelname;
+    char *subcktline;
+    struct vsmodels *nextmodel;
+};
+
+/* insert a new model, just behind the given model */
+static struct vsmodels *
+insert_new_model(struct vsmodels *vsmodel, char *name, char *subcktline)
+{
+    struct vsmodels *x = TMALLOC(struct vsmodels, 1);
+
+    x->nextmodel = vsmodel ? vsmodel->nextmodel : NULL;
+    x->modelname = copy(name);
+    x->subcktline = copy(subcktline);
+	if (vsmodel)
+		vsmodel->nextmodel = x;
+	else
+		vsmodel = x;
+
+    return vsmodel;
+}
+
+/* find the model */
+static bool
+find_a_model(struct vsmodels *vsmodel, char *name, char *subcktline)
+{
+    struct vsmodels *x;
+    for (x = vsmodel; vsmodel; vsmodel = vsmodel->nextmodel)
+        if (eq(vsmodel->modelname, name) && eq(vsmodel->subcktline, subcktline))
+            return TRUE;
+    return FALSE;
+}
+
+/* delete the vsmodels list */
+static bool
+del_models(struct vsmodels *vsmodel)
+{
+    struct vsmodels *x;
+
+    if (!vsmodel)
+        return FALSE;
+
+    while (vsmodel) {
+        x = vsmodel->nextmodel;
+        tfree(vsmodel->modelname);
+        tfree(vsmodel->subcktline);
+        tfree(vsmodel);
+        vsmodel = x;
+    }
+
+    return TRUE;
+}
+
+/**** PSPICE to ngspice **************
+* .model replacement in ako (a kind of) model descriptions
+* replace the E source TABLE function by a B source pwl
+* add predefined params TEMP, VT, GMIN to beginning of deck
+* add predefined params TEMP, VT, GMIN to beginning of each .subckt call
+* add .functions limit, pwr, pwrs, stp, if, int
+* replace
+  S1 D S DG GND SWN
+ .MODEL SWN VSWITCH(VON = { 0.55 } VOFF = { 0.49 } RON = { 1 / (2 * M*(W / LE)*(KPN / 2) * 10) }  ROFF = { 1G })
+* by
+  as1 %vd(DG GND) % gd(D S) aswn
+  .model aswn aswitch(cntl_off={0.49} cntl_on={0.55} r_off={1G}
+  + r_on={ 1 / (2 * M*(W / LE)*(KPN / 2) * 10) } log = TRUE)
+* replace & by &&
+* replace | by ||
+* in R instance, replace TC = xx1, xx2 by TC1=xx1 TC2=xx2
+* replace T_ABS by temp and T_REL_GLOBAL by dtemp in .model cards
+* get the area factor for diodes and bipolar devices */
+static struct card *
+pspice_compat(struct card *oldcard)
+{
+    struct card *card, *newcard, *nextcard;
+    struct vsmodels *modelsfound = NULL;
+    int skip_control = 0;
+
+    /* .model replacement in ako (a kind of) model descriptions
+    * in first .subckt and top level only */
+    struct card *errcard;
+    if ((errcard = ako_model(oldcard)) != NULL) {
+        fprintf(stderr, "Error: no model found for %s\n", errcard->line);
+        controlled_exit(1);
+    }
+
+    /* replace TABLE function in E source */
+    replace_table(oldcard);
+
+    /* add predefined params TEMP, VT, GMIN to beginning of deck */
+    char *new_str = copy(".param temp = 'temper - 273.15'");
+    newcard = insert_new_line(NULL, new_str, 1, 0);
+    new_str = copy(".param vt = 'temper * 8.6173303e-5'"); /*VT=kT/q, T * 1.380 648 52e-23/ 1.602 176 6208e-19*/
+    nextcard = insert_new_line(newcard, new_str, 2, 0);
+    new_str = copy(".param gmin = 1e-12");
+    nextcard = insert_new_line(nextcard, new_str, 3, 0);
+    /* add funcs limit, pwr, pwrs, stp, if, int */
+    new_str = copy(".func limit(x, a, b) { min(max(x, a), b) }");
+    nextcard = insert_new_line(nextcard, new_str, 4, 0);
+    new_str = copy(".func pwr(x, a) { abs(x) ** a }");
+    nextcard = insert_new_line(nextcard, new_str, 5, 0);
+    new_str = copy(".func pwrs(x, a) { sgn(x) * pwr(x, a) }");
+    nextcard = insert_new_line(nextcard, new_str, 6, 0);
+    new_str = copy(".func stp(x) { u(x) }");
+    nextcard = insert_new_line(nextcard, new_str, 7, 0);
+    new_str = copy(".func if(a, b, c) {ternary_fcn( a , b , c )}");
+    nextcard = insert_new_line(nextcard, new_str, 8, 0);
+    new_str = copy(".func int(x) { sign(x)*floor(abs(x)) }");
+    nextcard = insert_new_line(nextcard, new_str, 9, 0);
+    nextcard->nextcard = oldcard;
+
+    /* add predefined parameters TEMP, VT after each subckt call */
+    /* FIXME: This should not be necessary if we had a better sense of hierarchy
+    during the evaluation of TEMPER */
+    for (card = newcard; card; card = card->nextcard) {
+        char *cut_line = card->line;
+        if (ciprefix(".subckt", cut_line)) {
+            new_str = copy(".param temp = 'temper - 273.15'");
+            nextcard = insert_new_line(card, new_str, 0, 0);
+            new_str = copy(".param vt = 'temper * 8.6173303e-5'");
+            nextcard = insert_new_line(nextcard, new_str, 1, 0);
+        }
+    }
+
+    /* in R instance, replace TC = xx1, xx2 by TC1=xx1 TC2=xx2 */
+    for (card = newcard; card; card = card->nextcard) {
+        char *cut_line = card->line;
+
+        /* exclude any command inside .control ... .endc */
+        if (ciprefix(".control", cut_line)) {
+            skip_control++;
+            continue;
+        }
+        else if (ciprefix(".endc", cut_line)) {
+            skip_control--;
+            continue;
+        }
+        else if (skip_control > 0) {
+            continue;
+        }
+
+        if (*cut_line == 'r') {
+            char *tctok = search_plain_identifier(cut_line, "tc");
+            if (tctok) {
+                char *tctok1 = strchr(tctok,'=');
+                if (tctok1)
+                    /* skip '=' */
+                    tctok1 += 1;
+                else
+                    /* no '=' found, skip 'tc' */
+                    tctok1 = tctok + 2;
+                char *tc1 = gettok_node(&tctok1);
+                char *tc2 = gettok_node(&tctok1);
+                tctok[-1] = '\0';
+                char *newstring;
+                if (tc1 && tc2)
+                    newstring = tprintf("%s tc1=%s tc2=%s", cut_line, tc1, tc2);
+                else if (tc1)
+                    newstring = tprintf("%s tc1=%s", cut_line, tc1);
+                else {
+                    fprintf(stderr, "Warning: tc without parameters removed in line \n   %s\n", cut_line);
+                    continue;
+                }
+                tfree(card->line);
+                card->line = newstring;
+                tfree(tc1);
+                tfree(tc2);
+            }
+        }
+    }
+
+    /* replace & with && and | with || and *# with * # */
+    for (card = newcard; card; card = card->nextcard) {
+        char *t;
+        char *cut_line = card->line;
+
+        /* we don't have command lines in a PSPICE model */
+        if (ciprefix("*#", cut_line)) {
+            char *tmpstr = tprintf("* #%s", cut_line + 2);
+            tfree(card->line);
+            card->line = tmpstr;
+            continue;
+        }
+
+        if (*cut_line == '*')
+            continue;
+        /* exclude any command inside .control ... .endc */
+        if (ciprefix(".control", cut_line)) {
+            skip_control++;
+            continue;
+        }
+        else if (ciprefix(".endc", cut_line)) {
+            skip_control--;
+            continue;
+        }
+        else if (skip_control > 0) {
+            continue;
+        }
+        if ((t = strstr(card->line, "&")) != NULL) {
+            while (t && (t[1] != '&')) {
+                char *tt = NULL;
+                char *tn = copy(t + 1);/*skip |*/
+                char *strbeg = copy_substring(card->line, t);
+                tfree(card->line);
+                card->line = tprintf("%s&&%s", strbeg, tn);
+                tfree(strbeg);
+                tfree(tn);
+                t = card->line;
+                while ((t = strstr(t, "&&")) != NULL)
+                    tt = t = t + 2;
+                if (!tt)
+                    break;
+                else
+                    t = strstr(tt, "&");
+            }
+        }
+        if ((t = strstr(card->line, "|")) != NULL) {
+            while (t && (t[1] != '|')) {
+                char *tt = NULL;
+                char *tn = copy(t + 1);/*skip |*/
+                char *strbeg = copy_substring(card->line, t);
+                tfree(card->line);
+                card->line = tprintf("%s||%s", strbeg, tn);
+                tfree(strbeg);
+                tfree(tn);
+                t = card->line;
+                while ((t = strstr(t, "||")) != NULL)
+                    tt = t = t + 2;
+                if (!tt)
+                    break;
+                else
+                    t = strstr(tt, "|");
+            }
+        }
+    }
+
+    /* replace T_ABS by temp and T_REL_GLOBAL by dtemp in .model cards */
+    for (card = newcard; card; card = card->nextcard) {
+        char *cut_line = card->line;
+        if (ciprefix(".model", cut_line)) {
+            char *t_str;
+            if((t_str = strstr(cut_line, "t_abs")) != NULL)
+                memcpy(t_str, " temp", 5);
+            else if((t_str = strstr(cut_line, "t_rel_global")) != NULL)
+                memcpy(t_str, "       dtemp", 12);
+        }
+    }
+
+    /* get the area factor for diodes and bipolar devices
+    d1 n1 n2 dmod 7 --> d1 n1 n2 dmod area=7
+    q2 n1 n2 n3 [n4] bjtmod 1.35 --> q2 n1 n2 n3 n4 bjtmod area=1.35
+    q3 1 2 3 4 bjtmod 1.45 --> q2 1 2 3 4 bjtmod area=1.45
+    */
+    for (card = newcard; card; card = card->nextcard) {
+        static struct card *subcktline = NULL;
+        static int nesting = 0;
+        char *cut_line = card->line;
+        if (*cut_line == '*')
+            continue;
+        // exclude any command inside .control ... .endc
+        if (ciprefix(".control", cut_line)) {
+            skip_control++;
+            continue;
+        }
+        else if (ciprefix(".endc", cut_line)) {
+            skip_control--;
+            continue;
+        }
+        else if (skip_control > 0) {
+            continue;
+        }
+        if (*cut_line == 'q') {
+            cut_line = nexttok(cut_line); //.model
+            cut_line = nexttok(cut_line); // node1
+            cut_line = nexttok(cut_line); // node2
+            cut_line = nexttok(cut_line); // node3
+            if (*cut_line == '[') { // node4 not a number
+                *cut_line = ' ';
+                cut_line = strchr(cut_line, ']');
+                *cut_line = ' ';
+                cut_line = skip_ws(cut_line);
+                cut_line = nexttok(cut_line); // model name
+            }
+            else { // if an integer number, it is node4
+                bool is_node4 = TRUE;
+                while (*cut_line && !isspace(*cut_line))
+                    if (!isdigit(*cut_line++))
+                        is_node4 = FALSE; // already model name
+                if(is_node4)
+                    cut_line = nexttok(cut_line); // model name
+            }
+            if (*cut_line && atof(cut_line) > 0.0) { // size of area
+                char *tmpstr1 = copy_substring(card->line, cut_line);
+                char *tmpstr2 = tprintf("%s area=%s", tmpstr1, cut_line);
+                tfree(tmpstr1);
+                tfree(card->line);
+                card->line = tmpstr2;
+            }
+        }
+        else if (*cut_line == 'd') {
+            cut_line = nexttok(cut_line); //.model
+            cut_line = nexttok(cut_line); // node1
+            cut_line = nexttok(cut_line); // node2
+            cut_line = nexttok(cut_line); // model name
+            if (*cut_line && atof(cut_line) > 0.0) { // size of area
+                char *tmpstr1 = copy_substring(card->line, cut_line);
+                char *tmpstr2 = tprintf("%s area=%s", tmpstr1, cut_line);
+                tfree(tmpstr1);
+                tfree(card->line);
+                card->line = tmpstr2;
+            }
+        }
+    }
+
+/* replace
+* S1 D S DG GND SWN
+* .MODEL SWN VSWITCH ( VON = {0.55} VOFF = {0.49} RON={1/(2*M*(W/LE)*(KPN/2)*10)}  ROFF={1G} )
+* by
+* a1 %v(DG) %gd(D S) swa
+* .MODEL SWA aswitch(cntl_off=0.49 cntl_on=0.55 r_off=1G r_on={1/(2*M*(W/LE)*(KPN/2)*10)} log=TRUE)
+
+* simple hierachy, as nested subcircuits are not allowed in PSPICE */
+
+    /* first scan: find the vswitch models, transform them and put them into a list */
+    for (card = newcard; card; card = card->nextcard) {
+        char *str;
+        static struct card *subcktline = NULL;
+        static int nesting = 0;
+        char *cut_line = card->line;
+        if (ciprefix(".subckt", cut_line)) {
+            subcktline = card;
+            nesting++;
+        }
+        if (ciprefix(".ends", cut_line))
+            nesting--;
+
+        if (ciprefix(".model", card->line) && strstr(card->line, "vswitch")) {
+            char *modpar[4];
+            char *modname;
+            int i;
+
+            card->line = str = inp_remove_ws(card->line);
+            str = nexttok(str); /* throw away '.model' */
+            INPgetNetTok(&str, &modname, 0); /* model name */
+            if (!ciprefix("vswitch", str)) {
+                tfree(modname);
+                continue;
+            }
+            /* we have to find 4 parameters, identified by '=', separated by spaces */
+            char *equalptr[4];
+            equalptr[0] = strstr(str, "=");
+            if (!equalptr[0]) {
+                fprintf(stderr, "Error: not enough parameters in vswitch model\n   %s\n", card->line);
+                controlled_exit(1);
+            }
+            for (i = 1; i < 4; i++) {
+                equalptr[i] = strstr(equalptr[i - 1] + 1, "=");
+                if (!equalptr[i]) {
+                    fprintf(stderr, "Error: not enough parameters in vswitch model\n   %s\n", card->line);
+                    controlled_exit(1);
+                }
+            }
+            for (i = 0; i < 4; i++) {
+                equalptr[i] = skip_back_ws(equalptr[i], str);
+                equalptr[i] = skip_back_non_ws(equalptr[i], str);
+            }
+            for (i = 0; i < 3; i++)
+                modpar[i] = copy_substring(equalptr[i], equalptr[i + 1] - 1);
+            if (strrchr(equalptr[3], ')'))
+                modpar[3] = copy_substring(equalptr[3], strrchr(equalptr[3], ')'));
+            else
+                /* vswitch defined without parens */
+                modpar[3] = copy(equalptr[3]);
+            tfree(card->line);
+            /* replace VON by cntl_on, VOFF by cntl_off, RON by r_on, and ROFF by r_off */
+            rep_spar(modpar);
+            card->line = tprintf(".model a%s aswitch(%s %s %s %s  log=TRUE)",
+                modname, modpar[0], modpar[1], modpar[2], modpar[3]);
+            for (i = 0; i < 4; i++)
+                tfree(modpar[i]);
+            if (nesting > 0)
+                modelsfound = insert_new_model(modelsfound, modname, subcktline->line);
+            else
+                modelsfound = insert_new_model(modelsfound, modname, "top");
+            tfree(modname);
+        }
+    }
+
+    /* no need to continue if no vswitch is found */
+    if (!modelsfound)
+        return newcard;
+
+    /* second scan: find the switch instances s calling a vswitch model and transform them */
+    for (card = newcard; card; card = card->nextcard) {
+        static struct card *subcktline = NULL;
+        static int nesting = 0;
+        char *cut_line = card->line;
+        if (*cut_line == '*')
+            continue;
+        // exclude any command inside .control ... .endc
+        if (ciprefix(".control", cut_line)) {
+            skip_control++;
+            continue;
+        }
+        else if (ciprefix(".endc", cut_line)) {
+            skip_control--;
+            continue;
+        }
+        else if (skip_control > 0) {
+            continue;
+        }
+        if (ciprefix(".subckt", cut_line)) {
+            subcktline = card;
+            nesting++;
+        }
+        if (ciprefix(".ends", cut_line))
+            nesting--;
+
+        if (ciprefix("s", cut_line)) {
+            /* check for the model name */
+            int i;
+            char *stoks[6];
+            for (i = 0; i < 6; i++)
+                stoks[i] = gettok(&cut_line);
+            /* rewrite s line and replace it if a model is found */
+            if ((nesting > 0) && find_a_model(modelsfound, stoks[5], subcktline->line)) {
+                tfree(card->line);
+                card->line = tprintf("a%s %%vd(%s %s) %%gd(%s %s) a%s",
+                    stoks[0], stoks[3], stoks[4], stoks[1], stoks[2], stoks[5]);
+            }
+            /* if model is not within same subcircuit, search at top level */
+            else if (find_a_model(modelsfound, stoks[5], "top")) {
+                tfree(card->line);
+                card->line = tprintf("a%s %%vd(%s %s) %%gd(%s %s) a%s",
+                    stoks[0], stoks[3], stoks[4], stoks[1], stoks[2], stoks[5]);
+            }
+            for (i = 0; i < 6; i++)
+                tfree(stoks[i]);
+        }
+    }
+    del_models(modelsfound);
+
+    return newcard;
 }

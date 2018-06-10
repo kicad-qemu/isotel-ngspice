@@ -12,7 +12,7 @@
 # ---------------
 
 # Initialisation of configure
-AC_INIT([ngspice], [27], [http://ngspice.sourceforge.net/bugrep.html])
+AC_INIT([ngspice], [28], [http://ngspice.sourceforge.net/bugrep.html])
 
 # Unique file in the source directory
 AC_CONFIG_SRCDIR([src/ngspice.c])
@@ -89,6 +89,10 @@ AC_ARG_ENABLE([newpred],
 # --enable-newtrunc: define NEWTRUNC for the code
 AC_ARG_ENABLE([newtrunc],
     [AS_HELP_STRING([--enable-newtrunc], [Enable, how we want extrapolate capacitances.])])
+
+ # --enable-oldapps: define OLDAPPS
+AC_ARG_ENABLE([oldapps],
+    [AS_HELP_STRING([--enable-oldapps], [Enable making old, outdated apps.])])
 
 # --enable-sense2: define WANT_SENSE2 for the code
 AC_ARG_ENABLE([sense2],
@@ -175,6 +179,7 @@ AC_ARG_ENABLE([xgraph],
 # ngspice shared may want relative paths for spinit etc.
 AC_ARG_ENABLE([relpath],
     [AS_HELP_STRING([--enable-relpath], [Enable relative paths for spinit etc.])])
+
 # --with-readline:  Includes GNU readline support into CLI.  Default is "no".
 AC_ARG_WITH([readline],
     [AS_HELP_STRING([--with-readline[=yes/no]], [Enable GNU readline support for CLI. Default=no.])])
@@ -252,6 +257,7 @@ if test "x$enable_gprof" = xyes; then
         AC_MSG_ERROR([We only support --enable-gprof with GCC right now.])
     fi
 fi
+
 
 # Not sure that this will work....
 if test "x$with_checkergcc" = xyes; then
@@ -361,9 +367,9 @@ elif test "x$with_tcl" != x  &&  test "x$with_tcl" != xno ; then
         *)
             ;;
     esac
- 
+
     with_x=no
- 
+
     AC_MSG_CHECKING([for tclConfig.sh])
     tcl_config_sh=""
     if test "x$with_tcl" != xyes ; then
@@ -397,8 +403,8 @@ elif test "x$with_tcl" != x  &&  test "x$with_tcl" != xno ; then
                 break
             fi
         done
- 
- 
+
+
        if test "x$tcl_config_sh" = x ; then
            for dir in \
                `ls -dr /usr/local/tcltk/tcl[[7-9]].[[0-9]]* 2>/dev/null` \
@@ -426,22 +432,22 @@ elif test "x$with_tcl" != x  &&  test "x$with_tcl" != xno ; then
           done
        fi
     fi
- 
+
     AC_MSG_RESULT([${tcl_config_sh}])
- 
+
     if test "x$tcl_config_sh" = x ; then
         echo "can't find Tcl configuration script \"tclConfig.sh\""
         find /usr/ -name 'tclConfig.sh' -exec echo "Should you add --with-tcl={} to ./configure arguments?" \; | sed -re "s/\/tclConfig.sh/ /"
         exit 1
     fi
- 
+
  .  $tcl_config_sh
- 
+
     CFLAGS="$CFLAGS $TCL_INCLUDE_SPEC"
     CPPFLAGS="$CPPFLAGS $TCL_INCLUDE_SPEC"
- 
+
     AC_CHECK_HEADERS([tcl.h blt.h], [], [AC_MSG_ERROR([Couldn't find Tcl/BLT headers])])
- 
+
     if test ! -x "$TCL_EXEC_PREFIX/bin/tclsh$TCL_VERSION" ; then
         AC_MSG_ERROR([Couldn't find $TCL_EXEC_PREFIX/bin/tclsh$TCL_VERSION])
     fi
@@ -466,12 +472,12 @@ EOF
         [AC_MSG_ERROR([Couldnt find BLT library.])])
 
     AC_CHECK_LIB([pthread], [pthread_create])
-    
+
     if test -n "$libdir" ; then
         AC_SUBST([libdir])
         echo "libraries in $libdir"
     fi
-    
+
     if test -z "$libdir" ; then
         for TCL_PACKAGE_PATH_ELEMENT in $TCL_PACKAGE_PATH ; do
             if test -a "$TCL_PACKAGE_PATH_ELEMENT" ; then
@@ -676,6 +682,19 @@ esac
 
 AM_CONDITIONAL([NO_X], [test "x$has_no_x" = xtrue])
 AM_CONDITIONAL([NO_HELP], [test "x$has_no_help" = xtrue])
+
+
+# enabling making of the old and outdated applications
+# ngsconvert ngproc2mod ngmultidec ngmakeidx nghelp
+if test "x$enable_oldapps" = xyes ; then
+    AC_MSG_RESULT([ngnutmeg ngsconvert ngproc2mod ngmultidec ngmakeidx nghelp are made.])
+else
+    AC_MSG_RESULT([ngnutmeg ngsconvert ngproc2mod ngmultidec ngmakeidx nghelp are not made.])
+    AC_MSG_RESULT([No internal help available.])    
+    AC_DEFINE([NOINTHELP], [1], [Internal (old) help not available])
+fi
+AM_CONDITIONAL([OLDAPPS], [test "x$enable_oldapps" = xyes])
+
 
 # Check for a few typdefs:
 AC_TYPE_PID_T
@@ -979,7 +998,7 @@ if test "x$enable_adms" = xyes ; then
 else
 
     VLADEVDIR=""
-    NOTVLADEVDIR="adms"
+    NOTVLADEVDIR="adms/admst"
 
 fi
 
@@ -1071,6 +1090,7 @@ fi
 AC_CONFIG_FILES([Makefile
                  man/Makefile
                  man/man1/Makefile
+                 ngspice.pc
                  src/Makefile
                  src/spicelib/Makefile
                  src/spicelib/analysis/Makefile
@@ -1124,6 +1144,7 @@ AC_CONFIG_FILES([Makefile
                  src/spicelib/devices/vbic/Makefile
                  src/spicelib/devices/vccs/Makefile
                  src/spicelib/devices/vcvs/Makefile
+                 src/spicelib/devices/vdmos/Makefile
                  src/spicelib/devices/vsrc/Makefile
                  src/spicelib/devices/nbjt/Makefile
                  src/spicelib/devices/nbjt2/Makefile
@@ -1193,6 +1214,7 @@ AC_CONFIG_FILES([Makefile
                  tests/regression/misc/Makefile
                  tests/regression/sens/Makefile
                  tests/regression/temper/Makefile
+                 tests/regression/pipe/Makefile
                  tests/regression/pz/Makefile
                  tests/sensitivity/Makefile
                  tests/transient/Makefile

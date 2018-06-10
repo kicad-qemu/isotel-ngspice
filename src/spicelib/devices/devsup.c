@@ -614,6 +614,23 @@ DEVcmeyer(double vgs0,		/* initial voltage gate-source */
     *cgb = *cgb *.5 + covlgb;
 }
 
+/* model according to
+http://ltwiki.org/index.php5?title=Undocumented_LTspice#VDMOS:_Breakdown_and_Sub-threshold_Enhancements
+*/
+void
+DevCapVDMOS(double vgd, double cgdmin,
+            double cgdmax, double a, double cgs,
+            double *capgs, double *capgd, double *capgb)
+{
+    double s = (cgdmax - cgdmin) / (1 + M_PI / 2);
+    double y = cgdmax - s;
+    if (vgd > 0)
+        *capgd = 0.5 * (s * tanh(a * vgd) + y);
+    else
+        *capgd = 0.5 * (s * atan(a * vgd) + y);
+    *capgs = 0.5 * cgs;
+    *capgb = 0;
+}
 
 /* Compute the MOS overlap capacitances as functions of the device
  * terminal voltages 

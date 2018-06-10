@@ -38,7 +38,7 @@ char *INPdomodel(CKTcircuit *ckt, struct card *image, INPtables * tab)
 
     INPgetTok(&line, &modname, 1);	/* throw away '.model' */
     tfree(modname);
-    INPgetTok(&line, &modname, 1);      /* get model name */
+    INPgetNetTok(&line, &modname, 1);      /* get model name */
     INPinsert(&modname, tab);	   /* stick model name into table */
     INPgetTok(&line, &type_name, 1);     /* get model type */
 
@@ -210,6 +210,19 @@ char *INPdomodel(CKTcircuit *ckt, struct card *image, INPtables * tab)
 				("Device type URC not available in this binary\n");
 			}
 			INPmakeMod(modname, type, image);
+    }
+
+    /*  ------  Check if model is a VDMOS FET ------- */
+    else if ((strcmp(type_name, "vdmos") == 0) ||
+             (strcmp(type_name, "vdmosn") == 0) ||
+             (strcmp(type_name, "vdmosp") == 0)) {
+        type = INPtypelook("VDMOS");
+        if (type < 0) {
+            err =
+                INPmkTemp
+                ("Device type VDMOS not available in this binary\n");
+        }
+        INPmakeMod(modname, type, image);
     }
 
     /*  --------  Check if model is a MOSFET --------- */
@@ -446,6 +459,17 @@ char *INPdomodel(CKTcircuit *ckt, struct card *image, INPtables * tab)
 				("Device type Resistor not available in this binary\n");
 			}
 			INPmakeMod(modname, type, image);
+    }
+
+    /*  --------  Check if model is a PSPICE resistor --------- */
+    else if (strcmp(type_name, "res") == 0) {
+        type = INPtypelook("Resistor");
+        if (type < 0) {
+            err =
+                INPmkTemp
+                ("Device type Resistor not available in this binary\n");
+        }
+        INPmakeMod(modname, type, image);
     }
 
     /*  --------  Check if model is a transmission line of some sort --------- */

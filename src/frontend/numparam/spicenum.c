@@ -28,6 +28,7 @@ Todo:
 
 #include "ngspice/fteext.h"
 #include "ngspice/stringskip.h"
+#include "ngspice/compatmode.h"
 
 #ifdef SHARED_MODULE
 extern ATTRIBUTE_NORETURN void shared_exit(int status);
@@ -185,8 +186,12 @@ findsubname(dico_t *dico, SPICE_DSTRINGPTR dstr_p)
             char *t;
             entry_t *entry;
             /* check for known subckt name */
-            for (t = p; alfanum(*t); t++)
-                ;
+            if (inp_compat_mode == COMPATMODE_PS)
+                for (t = p; alfanumps(*t); t++)
+                    ;
+            else
+                for (t = p; alfanum(*t); t++)
+                    ;
             spice_dstring_reinit(&name);
             pscopy(&name, p, t);
             entry = entrynb(dico, spice_dstring_value(&name));
@@ -292,6 +297,7 @@ static bool inexpansionS = 0;   /* flag subckt expansion phase */
 static bool incontrolS = 0;     /* flag control code sections */
 static bool firstsignalS = 1;
 static dico_t *dicoS = NULL;
+static dico_t *dicos_list[100];
 
 
 static void
@@ -314,6 +320,8 @@ nupa_init(void)
         dicoS->dynrefptr[i] = NULL;
         dicoS->dyncategory[i] = '?';
     }
+
+    dicoS->linecount = dynmaxline;
 }
 
 
@@ -326,7 +334,7 @@ nupa_del_dicoS(void)
     if(!dicoS)
         return;
 
-    for (i = dynmaxline; i >= 0; i--)
+    for (i = dicoS->linecount; i >= 0; i--)
         txfree(dicoS->dynrefptr[i]);
 
     txfree(dicoS->dynrefptr);
@@ -682,4 +690,37 @@ nupa_signal(int sig)
         nupa_done();
         firstsignalS = 1;
     }
+}
+
+
+/* Store dicoS for each circuit loaded.
+   The return value will be stored in ft_curckt->ci_dicos.
+   We need to keep dicoS because it may be used by measure. */
+int
+nupa_add_dicoslist(void)
+{
+    int i;
+    for (i = 0; i < 100; i++)
+        if (dicos_list[i] == NULL) {
+            dicos_list[i] = dicoS;
+            break;
+        }
+
+    return (i);
+}
+
+
+/* remove dicoS from list if circuit is removed */
+void
+nupa_rem_dicoslist(int ir)
+{
+    dicos_list[ir] = NULL;
+}
+
+
+/* change dicoS to the active circuit */
+void
+nupa_set_dicoslist(int ir)
+{
+    dicoS = dicos_list[ir];
 }

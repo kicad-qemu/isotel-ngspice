@@ -44,6 +44,18 @@ receives the name of a vector (may be in the form 'vectorname' or
 The caller may then directly assess the vector data (but probably should
 not modify them).
 
+***************** If XSPICE is enabled *************************************
+**
+ngGet_Evt_NodeInfo(char*)
+receives the name of a event node vector (may be in the form 'vectorname' or
+<plotname>.vectorname) and returns a pointer to a evt_node_info struct.
+The caller may then directly assess the vector data.
+
+**
+char** ngSpice_AllEvtNodes(void);
+returns to the caller a pointer to an array of all event node names.
+****************************************************************************
+
 **
 ngSpice_Circ(char**)
 sends an array of null-terminated char* to ngspice.dll. Each char* contains a
@@ -163,6 +175,24 @@ typedef struct vecinfoall
 
 } vecinfoall, *pvecinfoall;
 
+/* to be used by ngGet_Evt_NodeInfo, returns all data of a specific node after simulation */
+#ifdef XSPICE
+/* a single data point */
+typedef struct evt_data
+{
+    int           dcop;        /* t.b.d. */
+    double        step;        /* simulation time */
+    char          *node_value; /* one of 0s, 1s, Us, 0r, 1r, Ur, 0z, 1z, Uz, 0u, 1u, Uu */
+} evt_data, *pevt_data;
+
+/* a list of all data points of the node selected by the char* argument to ngGet_Evt_NodeInfo */
+typedef struct evt_shared_data
+{
+    pevt_data *evt_dect; /* array of data */
+    int num_steps;       /* length of the array */
+} evt_shared_data, *pevt_shared_data;
+#endif
+
 
 /* callback functions
 addresses received from caller with ngSpice_Init() function
@@ -251,6 +281,38 @@ typedef int (GetSyncData)(double, double*, double, int, int, int, void*);
    void*       return pointer received from caller
 */
 
+#ifdef XSPICE
+/* callback functions
+addresses received from caller with ngSpice_Init_Evt() function
+*/
+
+/* Upon time step finished, called per node */
+typedef int (SendEvtData)(int, double, double, char *, void *, int, int, int, void*);
+/*
+   int         node index
+   double      step, actual simulation time
+   double      dvalue, a real value for specified structure component for plotting purposes
+   char        *svalue, a string value for specified structure component for printing
+   void        *pvalue, a binary data structure
+   int         plen, size of the *pvalue structure
+   int         mode, the mode (op, dc, tran) we are in
+   int         ident, identification number of calling ngspice shared lib
+   void*       return pointer received from caller
+*/
+
+/* Upon initialization, called once per event node
+   To build up a dictionary of nodes */
+typedef int (SendInitEvtData)(int, int, char*, char*, int, void*);
+/*
+   int         node index
+   int         maximum node index, number of nodes
+   char*       node name
+   char*       udn-name, node type
+   int         identification number of calling ngspice shared lib
+   void*       return pointer received from caller
+*/
+#endif
+
 /* ngspice initialization,
 printfcn: pointer to callback function for reading printf, fprintf
 statfcn: pointer to callback function for the status string and percent value
@@ -286,6 +348,24 @@ int  ngSpice_Command(char* command);
 /* get info about a vector */
 IMPEXP
 pvector_info ngGet_Vec_Info(char* vecname);
+
+#ifdef XSPICE
+/* get info about the event node vector */
+IMPEXP
+pevt_shared_data ngGet_Evt_NodeInfo(char* nodename);
+
+/* get a list of all event nodes */
+IMPEXP
+char** ngSpice_AllEvtNodes(void);
+
+/* initialization of XSPICE callback functions 
+sevtdata: data for a specific event node at time 'step'
+sinitevtdata: single line entry of event node dictionary (list)
+userData: pointer to user-defined data, will not be modified, but
+handed over back to caller during Callback, e.g. address of calling object */
+IMPEXP
+int  ngSpice_Init_Evt(SendEvtData* sevtdata, SendInitEvtData* sinitevtdata, void* userData);
+#endif
 
 
 /* send a circuit to ngspice.dll

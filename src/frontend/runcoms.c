@@ -15,6 +15,8 @@ Modified: 2000 AlansFixes
 #include "ngspice/ftedebug.h"
 #include "ngspice/dvec.h"
 
+#include "numparam/numpaif.h"
+
 #include "circuits.h"
 #include "completion.h"
 #include "runcoms.h"
@@ -108,6 +110,8 @@ com_scirc(wordlist *wl)
     modtab = ft_curckt->ci_modtab;
     /* get the database for save, iplot, stop */
     dbs = ft_curckt->ci_dbs;
+    /* set the numparam dicos structure for use with measure */
+    nupa_set_dicoslist(ft_curckt->ci_dicos);
 }
 
 
@@ -298,6 +302,7 @@ dosim(
         last_used_rawfile = NULL;
 
     ft_curckt->ci_inprogress = TRUE;
+    cp_vset("sim_status", CP_NUM, &err);
     /* "sens2" not used in ngspice */
     if (eq(what, "sens2")) {
         if (if_sens_run(ft_curckt->ci_ckt, ww, ft_curckt->ci_symtab) == 1) {
@@ -331,6 +336,7 @@ dosim(
             fprintf(cp_err, "%s simulation(s) aborted\n", what);
             ft_curckt->ci_inprogress = FALSE;
             err = 1;
+            cp_vset("sim_status", CP_NUM, &err);
         } else {
             ft_curckt->ci_inprogress = FALSE;
         }

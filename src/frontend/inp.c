@@ -52,6 +52,7 @@ Author: 1985 Wayne A. Christopher
 static char *upper(register char *string);
 static bool doedit(char *filename);
 static struct card *com_options = NULL;
+static struct card *mc_deck = NULL;
 static void cktislinear(CKTcircuit *ckt, struct card *deck);
 static void dotifeval(struct card *deck);
 
@@ -329,6 +330,14 @@ line_reverse(struct card *head)
 }
 
 
+/* free mc_deck */
+void
+mc_free(void)
+{
+    line_free(mc_deck, TRUE);
+}
+
+
 /* The routine to source a spice input deck. We read the deck in, take
  * out the front-end commands, and create a CKT structure. Also we
  * filter out the following cards: .save, .width, .four, .print, and
@@ -343,7 +352,7 @@ inp_spsource(FILE *fp, bool comfile, char *filename, bool intfile)
  *  intfile = whether input is from internal array.  Values are TRUE/FALSE
  */
 {
-    struct card *deck, *dd, *ld, *prev_param = NULL, *prev_card = NULL;
+    struct card *deck = NULL, *dd, *ld, *prev_param = NULL, *prev_card = NULL;
     struct card *realdeck = NULL, *options = NULL, *curr_meas = NULL;
     char *tt = NULL, name[BSIZE_SP], *s, *t, *temperature = NULL;
     double testemp = 0.0;
@@ -365,13 +374,38 @@ inp_spsource(FILE *fp, bool comfile, char *filename, bool intfile)
     char *dir_name = ngdirname(filename ? filename : ".");
 
     startTime = seconds();
-    deck = inp_readall(fp, dir_name, comfile, intfile, &expr_w_temper);
+    /* inp_source() called with fp: load from file, */
+    /* called with *fp == NULL and intfile: we want to load circuit from circarray */
+    if (fp || intfile) {
+        deck = inp_readall(fp, dir_name, comfile, intfile, &expr_w_temper);
+
+        /* files starting with *ng_script are user supplied command files */
+        if (deck && ciprefix("*ng_script", deck->line))
+            comfile = TRUE;
+        /* save a copy of the deck for later reloading with 'mc_source' */
+        if (deck && !comfile) {
+            if (mc_deck)
+                mc_free();
+            mc_deck = inp_deckcopy_oc(deck);
+        }
+    }
+    /* called with *fp == NULL and not intfile: we want to reload circuit from mc_deck */
+    else {
+        if (mc_deck) {
+            deck = inp_deckcopy(mc_deck);
+            expr_w_temper = TRUE;
+        }
+        else {
+            fprintf(stderr, "Error: No circuit loaded, cannot copy internally using mc_source\n");
+            controlled_exit(1);
+        }
+    }
     endTime = seconds();
     tfree(dir_name);
 
     /* if nothing came back from inp_readall, just close fp and return to caller */
     if (!deck) {
-        if (!intfile)
+        if (!intfile && fp)
             fclose(fp);
         return;
     }
@@ -393,7 +427,7 @@ inp_spsource(FILE *fp, bool comfile, char *filename, bool intfile)
         if (!deck->nextcard)
             fprintf(cp_err, "Warning: no lines in input\n");
     }
-    if (!intfile)
+    if (fp && !intfile)
         fclose(fp);
 
     /* Now save the IO context and start a new control set.  After we
@@ -587,21 +621,25 @@ inp_spsource(FILE *fp, bool comfile, char *filename, bool intfile)
             if (ft_ngdebug) {
                 /*debug: print into file*/
                 FILE *fdo = fopen("debug-out2.txt", "w");
-                struct card *t = NULL;
-                fprintf(fdo, "**************** uncommented deck **************\n\n");
-                /* always print first line */
-                fprintf(fdo, "%6d  %6d  %s\n", deck->linenum_orig, deck->linenum, deck->line);
-                /* here without out-commented lines */
-                for (t = deck->nextcard; t; t = t->nextcard) {
-                    if (*(t->line) == '*')
-                        continue;
-                    fprintf(fdo, "%6d  %6d  %s\n", t->linenum_orig, t->linenum, t->line);
+                if (fdo) {
+                    struct card *t = NULL;
+                    fprintf(fdo, "**************** uncommented deck **************\n\n");
+                    /* always print first line */
+                    fprintf(fdo, "%6d  %6d  %s\n", deck->linenum_orig, deck->linenum, deck->line);
+                    /* here without out-commented lines */
+                    for (t = deck->nextcard; t; t = t->nextcard) {
+                        if (*(t->line) == '*')
+                            continue;
+                        fprintf(fdo, "%6d  %6d  %s\n", t->linenum_orig, t->linenum, t->line);
+                    }
+                    fprintf(fdo, "\n****************** complete deck ***************\n\n");
+                    /* now completely */
+                    for (t = deck; t; t = t->nextcard)
+                        fprintf(fdo, "%6d  %6d  %s\n", t->linenum_orig, t->linenum, t->line);
+                    fclose(fdo);
                 }
-                fprintf(fdo, "\n****************** complete deck ***************\n\n");
-                /* now completely */
-                for (t = deck; t; t = t->nextcard)
-                    fprintf(fdo, "%6d  %6d  %s\n", t->linenum_orig, t->linenum, t->line);
-                fclose(fdo);
+                else
+                    fprintf(stderr, "Warning: Cannot open file debug-out2.txt for saving debug info\n");
             }
             for (dd = deck; dd; dd = dd->nextcard) {
                 /* get csparams and create vectors, being
@@ -729,21 +767,25 @@ inp_spsource(FILE *fp, bool comfile, char *filename, bool intfile)
         if (ft_ngdebug) {
             /*debug: print into file*/
             FILE *fdo = fopen("debug-out3.txt", "w");
-            struct card *t = NULL;
-            fprintf(fdo, "**************** uncommented deck **************\n\n");
-            /* always print first line */
-            fprintf(fdo, "%6d  %6d  %s\n", deck->linenum_orig, deck->linenum, deck->line);
-            /* here without out-commented lines */
-            for (t = deck->nextcard; t; t = t->nextcard) {
-                if (*(t->line) == '*')
-                    continue;
-                fprintf(fdo, "%6d  %6d  %s\n", t->linenum_orig, t->linenum, t->line);
+            if (fdo) {
+                struct card *t = NULL;
+                fprintf(fdo, "**************** uncommented deck **************\n\n");
+                /* always print first line */
+                fprintf(fdo, "%6d  %6d  %s\n", deck->linenum_orig, deck->linenum, deck->line);
+                /* here without out-commented lines */
+                for (t = deck->nextcard; t; t = t->nextcard) {
+                    if (*(t->line) == '*')
+                        continue;
+                    fprintf(fdo, "%6d  %6d  %s\n", t->linenum_orig, t->linenum, t->line);
+                }
+                fprintf(fdo, "\n****************** complete deck ***************\n\n");
+                /* now completely */
+                for (t = deck; t; t = t->nextcard)
+                    fprintf(fdo, "%6d  %6d  %s\n", t->linenum_orig, t->linenum, t->line);
+                fclose(fdo);
             }
-            fprintf(fdo, "\n****************** complete deck ***************\n\n");
-            /* now completely */
-            for (t = deck; t; t = t->nextcard)
-                fprintf(fdo, "%6d  %6d  %s\n", t->linenum_orig, t->linenum, t->line);
-            fclose(fdo);
+            else
+                fprintf(stderr, "Warning: Cannot open file debug-out3.txt for saving debug info\n");
         }
 
         /* Now the circuit is defined, so generate the parse trees */
@@ -1015,8 +1057,12 @@ inp_dodeck(
     ct->ci_inprogress = FALSE;
     ct->ci_runonce = FALSE;
     ct->ci_commands = end;
+    ct->ci_dicos = nupa_add_dicoslist();
+    /* prevent false reads in multi-threaded ngshared */
+#ifndef SHARED_MODULE    
     if (reuse)
         tfree(ct->ci_filename);
+#endif
     ct->ci_filename = copy(filename);
 
     if (!noparse) {
@@ -1069,6 +1115,14 @@ inp_dodeck(
 #if 0
     cp_addkword(CT_CKTNAMES, tt);
 #endif
+}
+
+
+void
+com_mc_source(wordlist *wl)
+{
+    NG_IGNORE(wl);
+    inp_spsource(NULL, FALSE, NULL, FALSE);
 }
 
 
@@ -1162,6 +1216,139 @@ com_edit(wordlist *wl)
         fprintf(cp_out, "running circuit\n");
         com_run(NULL);
     }
+}
+
+
+/* alter a parameter, either
+   subckt param:  alterparam subcktname pname=vpval
+   global .param: alterparam pname=pval
+   Changes params in mc_deck
+   To become effective, 'mc_source' has to be called after 'alterparam' */
+void
+com_alterparam(wordlist *wl)
+{
+    struct card *dd;
+    char *pname, *pval, *tmp, *subcktname = NULL, *linein, *linefree, *s;
+    bool found = FALSE;
+
+    if (!mc_deck) {
+        fprintf(cp_err, "Error: No internal deck available\n");
+        return;
+    }
+    linefree = wl_flatten(wl);
+    linein = skip_ws(linefree);
+    s = tmp = gettok_char(&linein, '=', FALSE, FALSE);
+    if (!s) {
+        fprintf(cp_err, "\nError: Wrong format in line 'alterparam %s'\n   command 'alterparam' skipped\n", linefree);
+        tfree(linefree);
+        return;
+    }
+    linein++; /* skip the '=' */
+    pval = gettok(&linein);
+    subcktname = gettok(&tmp);
+    if (!pval || !subcktname) {
+        fprintf(cp_err, "\nError: Wrong format in line 'alterparam %s'\n   command 'alterparam' skipped\n", linefree);
+        tfree(pval);
+        tfree(subcktname);
+        tfree(linefree);
+        return;
+    }
+    pname = gettok(&tmp);
+    if (!pname) {
+        pname = subcktname;
+        subcktname = NULL;
+    }
+    tfree(linefree);
+    tfree(s);
+    for (dd = mc_deck->nextcard; dd; dd = dd->nextcard) {
+        char *curr_line = dd->line;
+        /* alterparam subcktname pname=vpval
+           Parameters from within subcircuit are no longer .param lines, but have been added to
+           the .subckt line as pname=paval and to the x line as pval. pval in the x line takes
+           precedence when subciruit is called, so has to be replaced here.
+           Find subcircuit with subcktname.
+           After params: Count the number of parameters (notok) until parameter pname is found.
+           When found, search for x-line with subcktname.
+           Replace parameter value number notok by pval.
+        */
+        if (subcktname) {
+            /* find subcircuit */
+            if (ciprefix(".subckt", curr_line)) {
+                curr_line = nexttok(curr_line); /* skip .subckt */
+                char *sname = gettok(&curr_line);
+                if (eq(sname, subcktname)) {
+                    tfree(sname);
+                    curr_line = strstr(curr_line, "params:");
+                    curr_line = skip_non_ws(curr_line); /* skip params: */
+                    /* string to search for */
+                    char *pname_eq = tprintf("%s=", pname);
+                    int notok = 0;
+                    while (*curr_line) {
+                        char *token = gettok(&curr_line);
+                        if (ciprefix(pname_eq, token)) {
+                            tfree(token);
+                            found = TRUE;
+                            break;
+                        }
+                        notok++;
+                        tfree(token);
+                    }
+                    tfree(pname_eq);
+                    if (found) {
+                        /* find x line with same subcircuit name */
+                        struct card *xx;
+                        char *bsubb = tprintf(" %s ", subcktname);
+                        for (xx = mc_deck->nextcard; xx; xx = xx->nextcard) {
+                            char *xline = xx->line;
+                            if (*xline == 'x') {
+                                xline = strstr(xline, bsubb);
+                                if (xline) {
+                                    xline = nexttok(xline); /* skip subcktname */
+                                    int ii;
+                                    for (ii = 0; ii < notok; ii++)
+                                        xline = nexttok(xline); /* skip parameter values */
+                                    char *beg = copy_substring(xx->line, xline);
+                                    xline = nexttok(xline); /* skip parameter value to be replaced */
+                                    char *newline = tprintf("%s %s %s", beg, pval, xline);
+                                    tfree(xx->line);
+                                    xx->line = newline;
+                                    tfree(beg);
+                                }
+                                else
+                                    continue;
+                            }
+                        }
+                        tfree(bsubb);
+                    }
+                }
+                else {
+                    tfree(sname);
+                    continue;
+                }
+            }
+        } /* subcktname */
+        /* alterparam pname=vpval */
+        else {
+            if (ciprefix(".para", curr_line)) {
+                curr_line = nexttok(curr_line); /* skip .param */
+                char *name = gettok_char(&curr_line, '=', FALSE, FALSE);
+                if (eq(name, pname)) {
+                    curr_line = dd->line;
+                    char *start = gettok_char(&curr_line, '=', TRUE, FALSE);
+                    tfree(dd->line);
+                    dd->line = tprintf("%s%s", start, pval);
+                    found = TRUE;
+                    tfree(start);
+                }
+                tfree(name);
+            }
+        }
+    }
+    if (!found)
+        fprintf(cp_err, "\nError: parameter '%s' not found,\n   command 'alterparam' skipped\n", pname);
+    tfree(pval);
+    tfree(pname);
+    tfree(subcktname);
 }
 
 
@@ -1310,11 +1497,14 @@ create_circbyline(char *line)
     FILE *fp = NULL;
     if (!circarray)
         circarray = TMALLOC(char*, memlen);
+    char *p = skip_ws(line);
+    if (line < p)
+        memmove(line, p, strlen(p) + 1);
     circarray[linec++] = line;
     if (linec < memlen) {
         if (ciprefix(".end", line) && (line[4] == '\0' || isspace_c(line[4]))) {
             circarray[linec] = NULL;
-            inp_spsource(fp, FALSE, "", TRUE);
+            inp_spsource(fp, FALSE, NULL, TRUE);
             linec = 0;
         }
     }
@@ -1476,7 +1666,9 @@ inp_parse_temper(struct card *card, struct pt_temper **modtlist_p, struct pt_tem
             }
             /* go back over param name */
             char *end_param = skip_back_ws(eq_ptr, curr_line);
-            char *beg_param = skip_back_non_ws(end_param, curr_line);
+            char *beg_param = eq_ptr;
+            while (beg_param > curr_line && !isspace_c(beg_param[-1]) && beg_param[-1] != '(')
+                beg_param--;
             /* find end of expression string */
             char *beg_expr = skip_ws(eq_ptr + 1);
             char *end_expr = find_assignment(beg_expr);
