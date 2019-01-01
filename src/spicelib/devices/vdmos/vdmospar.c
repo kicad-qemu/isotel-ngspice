@@ -25,7 +25,7 @@ VDMOSparam(int param, IFvalue *value, GENinstance *inst, IFvalue *select)
 
     NG_IGNORE(select);
 
-    if (!cp_getvar("scale", CP_REAL, &scale))
+    if (!cp_getvar("scale", CP_REAL, &scale, 0))
         scale = 1;
 
     switch(param) {
@@ -52,10 +52,6 @@ VDMOSparam(int param, IFvalue *value, GENinstance *inst, IFvalue *select)
         case VDMOS_OFF:
             here->VDMOSoff = (value->iValue != 0);
             break;
-        case VDMOS_IC_VBS:
-            here->VDMOSicVBS = value->rValue;
-            here->VDMOSicVBSGiven = TRUE;
-            break;
         case VDMOS_IC_VDS:
             here->VDMOSicVDS = value->rValue;
             here->VDMOSicVDSGiven = TRUE;
@@ -66,9 +62,6 @@ VDMOSparam(int param, IFvalue *value, GENinstance *inst, IFvalue *select)
             break;
         case VDMOS_IC:
             switch(value->v.numValue){
-                case 3:
-                    here->VDMOSicVBS = *(value->v.vec.rVec+2);
-                    here->VDMOSicVBSGiven = TRUE;
                 case 2:
                     here->VDMOSicVGS = *(value->v.vec.rVec+1);
                     here->VDMOSicVGSGiven = TRUE;

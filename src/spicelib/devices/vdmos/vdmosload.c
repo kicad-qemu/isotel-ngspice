@@ -15,9 +15,7 @@ VDMOS: 2018 Holger Vogt
 #include "ngspice/suffix.h"
 
 static double
-cweakinv(double sl, double shift, double vgst, double vds, double lambda, double beta, double vt, double mtr);
-static double
-cweakinv2(double sl, double shift, double vgst, double vds, double lambda, double beta, double vt, double mtr);
+cweakinv2(double sl, double shift, double vgst, double vds, double lambda, double beta, double vt, double mtr, double theta);
 
 
 int
@@ -32,32 +30,21 @@ VDMOSload(GENmodel *inModel, CKTcircuit *ckt)
     double DrainSatCur;
     double SourceSatCur;
     double arg;
-    double cbhat;
     double cdhat;
     double cdrain;
     double cdreq;
     double ceq;
-    double ceqbd;
-    double ceqbs;
-    double ceqgb;
     double ceqgd;
     double ceqgs;
-    double delvbd;
-    double delvbs;
     double delvds;
     double delvgd;
     double delvgs;
-    double gcgb;
     double gcgd;
     double gcgs;
     double geq;
     double sarg;
-    double vbd;
-    double vbs;
     double vds;
     double vdsat;
-    double vgb1;
-    double vgb;
     double vgd1;
     double vgd;
     double vgdo;
@@ -72,12 +59,10 @@ VDMOSload(GENmodel *inModel, CKTcircuit *ckt)
     int xrev;
     double capgs = 0.0;   /* total gate-source capacitance */
     double capgd = 0.0;   /* total gate-drain capacitance */
-    double capgb = 0.0;   /* total gate-bulk capacitance */
     int Check;
-#ifndef NOBYPASS
-    double tempv;
-#endif /*NOBYPASS*/
     int error;
+
+    double CGBdummy;
 
     /*  loop through all the VDMOS device models */
     for (; model != NULL; model = VDMOSnextModel(model)) {
@@ -123,10 +108,6 @@ VDMOSload(GENmodel *inModel, CKTcircuit *ckt)
                     /* predictor step */
 
                     xfact = ckt->CKTdelta / ckt->CKTdeltaOld[1];
-                    *(ckt->CKTstate0 + here->VDMOSvbs) =
-                        *(ckt->CKTstate1 + here->VDMOSvbs);
-                    vbs = (1 + xfact)* (*(ckt->CKTstate1 + here->VDMOSvbs))
-                          - (xfact * (*(ckt->CKTstate2 + here->VDMOSvbs)));
                     *(ckt->CKTstate0 + here->VDMOSvgs) =
                         *(ckt->CKTstate1 + here->VDMOSvgs);
                     vgs = (1 + xfact)* (*(ckt->CKTstate1 + here->VDMOSvgs))
@@ -135,17 +116,11 @@ VDMOSload(GENmodel *inModel, CKTcircuit *ckt)
                         *(ckt->CKTstate1 + here->VDMOSvds);
                     vds = (1 + xfact)* (*(ckt->CKTstate1 + here->VDMOSvds))
                           - (xfact * (*(ckt->CKTstate2 + here->VDMOSvds)));
-                    *(ckt->CKTstate0 + here->VDMOSvbd) =
-                        *(ckt->CKTstate0 + here->VDMOSvbs) -
-                        *(ckt->CKTstate0 + here->VDMOSvds);
                 } else {
 #endif /* PREDICTOR */
 
                     /* general iteration */
 
-                    vbs = model->VDMOStype * (
-                              *(ckt->CKTrhsOld + here->VDMOSbNode) -
-                              *(ckt->CKTrhsOld + here->VDMOSsNodePrime));
                     vgs = model->VDMOStype * (
                               *(ckt->CKTrhsOld + here->VDMOSgNodePrime) -
                               *(ckt->CKTrhsOld + here->VDMOSsNodePrime));
@@ -158,13 +133,9 @@ VDMOSload(GENmodel *inModel, CKTcircuit *ckt)
 
                 /* now some common crunching for some more useful quantities */
 
-                vbs = 0;
-                vbd = vbs - vds;
                 vgd = vgs - vds;
                 vgdo = *(ckt->CKTstate0 + here->VDMOSvgs) -
                        *(ckt->CKTstate0 + here->VDMOSvds);
-                delvbs = vbs - *(ckt->CKTstate0 + here->VDMOSvbs);
-                delvbd = vbd - *(ckt->CKTstate0 + here->VDMOSvbd);
                 delvgs = vgs - *(ckt->CKTstate0 + here->VDMOSvgs);
                 delvds = vds - *(ckt->CKTstate0 + here->VDMOSvds);
                 delvgd = vgd - vgdo;
@@ -173,46 +144,21 @@ VDMOSload(GENmodel *inModel, CKTcircuit *ckt)
 
                 if (here->VDMOSmode >= 0) {
                     cdhat =
-                        here->VDMOScd -
-                        here->VDMOSgbd * delvbd +
-                        here->VDMOSgmbs * delvbs +
-                        here->VDMOSgm * delvgs +
-                        here->VDMOSgds * delvds;
+                            here->VDMOScd
+                          + here->VDMOSgm * delvgs
+                          + here->VDMOSgds * delvds;
                 } else {
                     cdhat =
-                        here->VDMOScd -
-                        (here->VDMOSgbd -
-                         here->VDMOSgmbs) * delvbd -
-                        here->VDMOSgm * delvgd +
-                        here->VDMOSgds * delvds;
+                            here->VDMOScd
+                          - here->VDMOSgm * delvgd
+                          + here->VDMOSgds * delvds;
                 }
-                cbhat =
-                    here->VDMOScbs +
-                    here->VDMOScbd +
-                    here->VDMOSgbd * delvbd +
-                    here->VDMOSgbs * delvbs;
-
 
 #ifndef NOBYPASS
                 /* now lets see if we can bypass (ugh) */
-                tempv = (MAX(fabs(cbhat),
-                             fabs(here->VDMOScbs + here->VDMOScbd)) +
-                         ckt->CKTabstol);
                 if ((!(ckt->CKTmode &
                         (MODEINITPRED | MODEINITTRAN | MODEINITSMSIG))) &&
                         (ckt->CKTbypass) &&
-                        (fabs(cbhat - (here->VDMOScbs +
-                                       here->VDMOScbd)) < ckt->CKTreltol * tempv) &&
-                        (fabs(delvbs) < (ckt->CKTreltol *
-                                         MAX(fabs(vbs),
-                                             fabs(*(ckt->CKTstate0 +
-                                                    here->VDMOSvbs))) +
-                                         ckt->CKTvoltTol)) &&
-                        (fabs(delvbd) < (ckt->CKTreltol *
-                                         MAX(fabs(vbd),
-                                             fabs(*(ckt->CKTstate0 +
-                                                    here->VDMOSvbd))) +
-                                         ckt->CKTvoltTol)) &&
                         (fabs(delvgs) < (ckt->CKTreltol *
                                          MAX(fabs(vgs),
                                              fabs(*(ckt->CKTstate0 +
@@ -233,20 +179,15 @@ VDMOSload(GENmodel *inModel, CKTcircuit *ckt)
                      * copy all the values computed last iteration out
                      * and keep going
                      */
-                    vbs = *(ckt->CKTstate0 + here->VDMOSvbs);
-                    vbd = *(ckt->CKTstate0 + here->VDMOSvbd);
                     vgs = *(ckt->CKTstate0 + here->VDMOSvgs);
                     vds = *(ckt->CKTstate0 + here->VDMOSvds);
                     vgd = vgs - vds;
-                    vgb = vgs - vbs;
-                    cdrain = here->VDMOSmode * (here->VDMOScd + here->VDMOScbd);
+                    cdrain = here->VDMOSmode * (here->VDMOScd);
                     if (ckt->CKTmode & (MODETRAN | MODETRANOP)) {
                         capgs = (*(ckt->CKTstate0 + here->VDMOScapgs) +
                                  *(ckt->CKTstate1 + here->VDMOScapgs));
                         capgd = (*(ckt->CKTstate0 + here->VDMOScapgd) +
                                  *(ckt->CKTstate1 + here->VDMOScapgd));
-                        capgb = (*(ckt->CKTstate0 + here->VDMOScapgb) +
-                                 *(ckt->CKTstate1 + here->VDMOScapgb));
 
                     }
                     goto bypass;
@@ -281,15 +222,6 @@ VDMOSload(GENmodel *inModel, CKTcircuit *ckt)
                     }
                     vgs = vgd + vds;
                 }
-                if (vds >= 0) {
-                    vbs = DEVpnjlim(vbs, *(ckt->CKTstate0 + here->VDMOSvbs),
-                                    vt, here->VDMOSsourceVcrit, &Check);
-                    vbd = vbs - vds;
-                } else {
-                    vbd = DEVpnjlim(vbd, *(ckt->CKTstate0 + here->VDMOSvbd),
-                                    vt, here->VDMOSdrainVcrit, &Check);
-                    vbs = vbd + vds;
-                }
 #endif /*NODELIMITING*/
 
 
@@ -303,17 +235,15 @@ VDMOSload(GENmodel *inModel, CKTcircuit *ckt)
                 if ((ckt->CKTmode & MODEINITJCT) && !here->VDMOSoff) {
                     vds = model->VDMOStype * here->VDMOSicVDS;
                     vgs = model->VDMOStype * here->VDMOSicVGS;
-                    vbs = model->VDMOStype * here->VDMOSicVBS;
-                    if ((vds == 0) && (vgs == 0) && (vbs == 0) &&
+                    if ((vds == 0) && (vgs == 0) &&
                             ((ckt->CKTmode &
                               (MODETRAN | MODEDCOP | MODEDCTRANCURVE)) ||
                              (!(ckt->CKTmode & MODEUIC)))) {
-                        vbs = 0;
                         vgs = model->VDMOStype * here->VDMOStVto;
                         vds = 0;
                     }
                 } else {
-                    vbs = vgs = vds = 0;
+                    vgs = vds = 0;
                 }
             }
 
@@ -322,19 +252,8 @@ VDMOSload(GENmodel *inModel, CKTcircuit *ckt)
              * now all the preliminaries are over - we can start doing the
              * real work
              */
-            vbd = vbs - vds;
             vgd = vgs - vds;
-            vgb = vgs - vbs;
 
-
-            /*
-             * bulk-source and bulk-drain diodes are not available in vdmos
-             */
-
-            here->VDMOSgbs = 0;
-            here->VDMOScbs = 0;
-            here->VDMOSgbd = 0;
-            here->VDMOScbd = 0;
 
             /* now to determine whether the user was able to correctly
              * identify the source and drain of his device
@@ -356,63 +275,80 @@ VDMOSload(GENmodel *inModel, CKTcircuit *ckt)
                  *
                  */
 
-                /* the following 4 variables are local to this code block until
+                /* the following 2 variables are local to this code block until
                  * it is obvious that they can be made global
                  */
-                double arg;
                 double betap;
                 double vgst;
 
                 von = (model->VDMOSvt0*model->VDMOStype);
                 vgst = (here->VDMOSmode == 1 ? vgs : vgd) - von;
                 vdsat = MAX(vgst, 0);
-                arg = 0;
-                /* drain current including subthreshold current
-                 * numerical differentiation for gd and gm with a delta of 2 mV */
-                if (model->VDMOSksubthresGiven && (here->VDMOSmode == 1)) {
-                    double delta = 0.001;
-                    cdrain = cweakinv(model->VDMOSksubthres, model->VDMOSsubshift, vgst, vds, model->VDMOSlambda,
-                        Beta, vt, model->VDMOSmtr);
-                    /* gd */
-                    double vds1 = vds + delta;
-                    double cdrp = cweakinv(model->VDMOSksubthres, model->VDMOSsubshift, vgst, vds1, model->VDMOSlambda,
-                        Beta, vt, model->VDMOSmtr);
-                    vds1 = vds - delta;
-                    double cdrm = cweakinv(model->VDMOSksubthres, model->VDMOSsubshift, vgst, vds1, model->VDMOSlambda,
-                        Beta, vt, model->VDMOSmtr);
-                    here->VDMOSgds = (cdrp - cdrm) / (2. * delta);
-                    /* gm */
-                    double vgst1 = vgst + delta;
-                    cdrp = cweakinv(model->VDMOSksubthres, model->VDMOSsubshift, vgst1, vds, model->VDMOSlambda,
-                        Beta, vt, model->VDMOSmtr);
-                    vgst1 = vgst - delta;
-                    cdrm = cweakinv(model->VDMOSksubthres, model->VDMOSsubshift, vgst1, vds, model->VDMOSlambda,
-                        Beta, vt, model->VDMOSmtr);
-                    here->VDMOSgm = (cdrp - cdrm) / (2. * delta);
-                    here->VDMOSgmbs = 0.;
+                if (model->VDMOSksubthresGiven) {
+                /* Alternative simple weak inversion model, according to https://www.anasoft.co.uk/MOS1Model.htm
+                 * Scale the voltage overdrive vgst logarithmically in weak inversion.
+                 * Best fits LTSPICE curves with shift=0
+                 * Drain current including subthreshold current */
+
+                    double slope = model->VDMOSksubthres;
+                    double lambda = model->VDMOSlambda;
+                    double theta = model->VDMOStheta;
+                    double shift = model->VDMOSsubshift;
+                    double mtr = model->VDMOSmtr;
+
+                    /* scale vds with mtr (except with lambda) */
+                    double vdss = vds*mtr*here->VDMOSmode;
+                    double t0 = 1 + lambda*vds;
+                    double t1 = 1 + theta*vgs;
+                    betap = Beta*t0/t1;
+                    double dbetapdvgs = -Beta*theta*t0/(t1*t1);
+                    double dbetapdvds = Beta*lambda/t1;
+
+                    double t2 = exp((vgst-shift)/slope);
+                    vgst = slope * log(1 + t2);
+                    double dvgstdvgs = t2/(t2+1);
+
+                    if (vgst <= vdss) {
+                        /* saturation region */
+                        cdrain = betap*vgst*vgst*.5;
+                        here->VDMOSgm = betap*vgst*dvgstdvgs + 0.5*dbetapdvgs*vgst*vgst;
+                        here->VDMOSgds = .5*dbetapdvds*vgst*vgst;
+                    }
+                    else {
+                        /* linear region */
+                        cdrain = betap * vdss * (vgst - .5 * vdss);
+                        here->VDMOSgm = betap*vdss*dvgstdvgs + vdss*dbetapdvgs*(vgst-.5*vdss);
+                        here->VDMOSgds = vdss*dbetapdvds*(vgst-.5*vdss) + betap*mtr*(vgst-.5*vdss) - .5*vdss*betap*mtr;
+                    }
                 }
-                else if (model->VDMOSsubslGiven && (here->VDMOSmode == 1)) {
+                else if (model->VDMOSsubslGiven) {
+                    /* numerical differentiation for gd and gm with a delta of 2 mV */
+                    double vdsm = vds * here->VDMOSmode;
                     double delta = 0.001;
-                    cdrain = cweakinv2(model->VDMOSsubsl, model->VDMOSsubshift, vgst, vds, model->VDMOSlambda,
-                        Beta, vt, model->VDMOSmtr);
+                    cdrain = cweakinv2(model->VDMOSsubsl, model->VDMOSsubshift, vgst, vdsm, model->VDMOSlambda,
+                        Beta, vt, model->VDMOSmtr, model->VDMOStheta);
                     /* gd */
-                    double vds1 = vds + delta;
+                    double vds1 = vdsm + delta;
                     double cdrp = cweakinv2(model->VDMOSsubsl, model->VDMOSsubshift, vgst, vds1, model->VDMOSlambda,
-                        Beta, vt, model->VDMOSmtr);
-                    vds1 = vds - delta;
+                        Beta, vt, model->VDMOSmtr, model->VDMOStheta);
+                    vds1 = vdsm - delta;
                     double cdrm = cweakinv2(model->VDMOSsubsl, model->VDMOSsubshift, vgst, vds1, model->VDMOSlambda,
-                        Beta, vt, model->VDMOSmtr);
+                        Beta, vt, model->VDMOSmtr, model->VDMOStheta);
                     here->VDMOSgds = (cdrp - cdrm) / (2. * delta);
                     /* gm */
                     double vgst1 = vgst + delta;
-                    cdrp = cweakinv2(model->VDMOSsubsl, model->VDMOSsubshift, vgst1, vds, model->VDMOSlambda,
-                        Beta, vt, model->VDMOSmtr);
+                    cdrp = cweakinv2(model->VDMOSsubsl, model->VDMOSsubshift, vgst1, vdsm, model->VDMOSlambda,
+                        Beta, vt, model->VDMOSmtr, model->VDMOStheta);
                     vgst1 = vgst - delta;
-                    cdrm = cweakinv2(model->VDMOSsubsl, model->VDMOSsubshift, vgst1, vds, model->VDMOSlambda,
-                        Beta, vt, model->VDMOSmtr);
+                    cdrm = cweakinv2(model->VDMOSsubsl, model->VDMOSsubshift, vgst1, vdsm, model->VDMOSlambda,
+                        Beta, vt, model->VDMOSmtr, model->VDMOStheta);
                     here->VDMOSgm = (cdrp - cdrm) / (2. * delta);
-                    here->VDMOSgmbs = 0.;
                 } else {
+                    double onfg, fgate, Betam, dfgdvg;
+                    onfg = 1.0+model->VDMOStheta*vgst;
+                    fgate = 1.0/onfg;
+                    Betam = Beta * fgate;
+                    dfgdvg = -model->VDMOStheta*fgate*fgate;
                     if (vgst <= 0) {
                         /*
                          *     cutoff region
@@ -420,31 +356,28 @@ VDMOSload(GENmodel *inModel, CKTcircuit *ckt)
                         cdrain = 0;
                         here->VDMOSgm = 0;
                         here->VDMOSgds = 0;
-                        here->VDMOSgmbs = 0;
                     } else {
-                        /*
-                         *     saturation region
-                         */
                         /* scale vds with mtr */
                         double mtr = model->VDMOSmtr;
-                        betap = Beta*(1 + model->VDMOSlambda*(vds*here->VDMOSmode));
+                        betap = Betam*(1 + model->VDMOSlambda*(vds*here->VDMOSmode));
                         if (vgst <= (vds * here->VDMOSmode) * mtr) {
+                            /*
+                             *     saturation region
+                             */
                             cdrain = betap*vgst*vgst*.5;
-                            here->VDMOSgm = betap*vgst;
-                            here->VDMOSgds = model->VDMOSlambda*Beta*vgst*vgst*.5;
-                            here->VDMOSgmbs = here->VDMOSgm*arg;
+                            here->VDMOSgm = betap*vgst * fgate + dfgdvg * cdrain;
+                            here->VDMOSgds = model->VDMOSlambda*Betam*vgst*vgst*.5;
                         } else {
                             /*
                              *     linear region
                              */
                             cdrain = betap * (vds * here->VDMOSmode) * mtr *
                                      (vgst - .5 * (vds*here->VDMOSmode) * mtr);
-                            here->VDMOSgm = betap * (vds * here->VDMOSmode) * mtr;
+                            here->VDMOSgm = betap * (vds * here->VDMOSmode) * mtr  * fgate + dfgdvg * cdrain;
                             here->VDMOSgds = betap * (vgst - (vds * here->VDMOSmode) * mtr) +
-                                             model->VDMOSlambda * Beta *
+                                             model->VDMOSlambda * Betam *
                                              (vds * here->VDMOSmode) * mtr *
                                              (vgst - .5 * (vds * here->VDMOSmode) * mtr);
-                            here->VDMOSgmbs = here->VDMOSgm * arg;
                         }
                     }
                 }
@@ -459,24 +392,10 @@ VDMOSload(GENmodel *inModel, CKTcircuit *ckt)
             /*
              *  COMPUTE EQUIVALENT DRAIN CURRENT SOURCE
              */
-            here->VDMOScd = here->VDMOSmode * cdrain - here->VDMOScbd;
-
-            if (ckt->CKTmode & (MODETRAN | MODETRANOP | MODEINITSMSIG)) {
-                /*
-                 * capacitance evaluation for drain-source is done with the bulk diode
-                 */
-                *(ckt->CKTstate0 + here->VDMOSqbs) = 0;
-                here->VDMOScapbs = 0;
-
-                *(ckt->CKTstate0 + here->VDMOSqbd) = 0;
-                here->VDMOScapbd = 0;
-            }
-
+            here->VDMOScd = here->VDMOSmode * cdrain;
 
             /* save things away for next time */
 
-            *(ckt->CKTstate0 + here->VDMOSvbs) = vbs;
-            *(ckt->CKTstate0 + here->VDMOSvbd) = vbd;
             *(ckt->CKTstate0 + here->VDMOSvgs) = vgs;
             *(ckt->CKTstate0 + here->VDMOSvds) = vds;
 
@@ -499,22 +418,18 @@ VDMOSload(GENmodel *inModel, CKTcircuit *ckt)
                 DevCapVDMOS(vgd, cgdmin, cgdmax, a, cgs,
                             (ckt->CKTstate0 + here->VDMOScapgs),
                             (ckt->CKTstate0 + here->VDMOScapgd),
-                            (ckt->CKTstate0 + here->VDMOScapgb));
+                             &CGBdummy);
 
                 vgs1 = *(ckt->CKTstate1 + here->VDMOSvgs);
                 vgd1 = vgs1 - *(ckt->CKTstate1 + here->VDMOSvds);
-                vgb1 = vgs1 - *(ckt->CKTstate1 + here->VDMOSvbs);
                 if (ckt->CKTmode & (MODETRANOP | MODEINITSMSIG)) {
                     capgs = 2 * *(ckt->CKTstate0 + here->VDMOScapgs);
                     capgd = 2 * *(ckt->CKTstate0 + here->VDMOScapgd);
-                    capgb = 2 * *(ckt->CKTstate0 + here->VDMOScapgb);
                 } else {
                     capgs = (*(ckt->CKTstate0 + here->VDMOScapgs) +
                              *(ckt->CKTstate1 + here->VDMOScapgs));
                     capgd = (*(ckt->CKTstate0 + here->VDMOScapgd) +
                              *(ckt->CKTstate1 + here->VDMOScapgd));
-                    capgb = (*(ckt->CKTstate0 + here->VDMOScapgb) +
-                             *(ckt->CKTstate1 + here->VDMOScapgb));
                 }
                 /*
 
@@ -528,9 +443,6 @@ VDMOSload(GENmodel *inModel, CKTcircuit *ckt)
                     *(ckt->CKTstate0 + here->VDMOSqgd) =
                         (1 + xfact) * *(ckt->CKTstate1 + here->VDMOSqgd)
                         - xfact * *(ckt->CKTstate2 + here->VDMOSqgd);
-                    *(ckt->CKTstate0 + here->VDMOSqgb) =
-                        (1 + xfact) * *(ckt->CKTstate1 + here->VDMOSqgb)
-                        - xfact * *(ckt->CKTstate2 + here->VDMOSqgb);
                 } else {
 #endif /*PREDICTOR*/
                     if (ckt->CKTmode & MODETRAN) {
@@ -538,13 +450,10 @@ VDMOSload(GENmodel *inModel, CKTcircuit *ckt)
                                                              *(ckt->CKTstate1 + here->VDMOSqgs);
                         *(ckt->CKTstate0 + here->VDMOSqgd) = (vgd - vgd1)*capgd +
                                                              *(ckt->CKTstate1 + here->VDMOSqgd);
-                        *(ckt->CKTstate0 + here->VDMOSqgb) = (vgb - vgb1)*capgb +
-                                                             *(ckt->CKTstate1 + here->VDMOSqgb);
                     } else {
                         /* TRANOP only */
                         *(ckt->CKTstate0 + here->VDMOSqgs) = vgs*capgs;
                         *(ckt->CKTstate0 + here->VDMOSqgd) = vgd*capgd;
-                        *(ckt->CKTstate0 + here->VDMOSqgb) = vgb*capgb;
                     }
 #ifndef PREDICTOR
                 }
@@ -564,12 +473,9 @@ bypass :
                 ceqgs = 0;
                 gcgd = 0;
                 ceqgd = 0;
-                gcgb = 0;
-                ceqgb = 0;
             } else {
                 if (capgs == 0) *(ckt->CKTstate0 + here->VDMOScqgs) = 0;
                 if (capgd == 0) *(ckt->CKTstate0 + here->VDMOScqgd) = 0;
-                if (capgb == 0) *(ckt->CKTstate0 + here->VDMOScqgb) = 0;
                 /*
                  *    calculate equivalent conductances and currents for
                  *    meyer"s capacitors
@@ -578,42 +484,32 @@ bypass :
                 if (error) return(error);
                 error = NIintegrate(ckt, &gcgd, &ceqgd, capgd, here->VDMOSqgd);
                 if (error) return(error);
-                error = NIintegrate(ckt, &gcgb, &ceqgb, capgb, here->VDMOSqgb);
-                if (error) return(error);
                 ceqgs = ceqgs - gcgs*vgs + ckt->CKTag[0] *
                         *(ckt->CKTstate0 + here->VDMOSqgs);
                 ceqgd = ceqgd - gcgd*vgd + ckt->CKTag[0] *
                         *(ckt->CKTstate0 + here->VDMOSqgd);
-                ceqgb = ceqgb - gcgb*vgb + ckt->CKTag[0] *
-                        *(ckt->CKTstate0 + here->VDMOSqgb);
             }
 
             /*
              *  load current vector
              */
-            ceqbs = model->VDMOStype *
-                    (here->VDMOScbs - (here->VDMOSgbs)*vbs);
-            ceqbd = model->VDMOStype *
-                    (here->VDMOScbd - (here->VDMOSgbd)*vbd);
             if (here->VDMOSmode >= 0) {
                 xnrm = 1;
                 xrev = 0;
                 cdreq = model->VDMOStype*(cdrain - here->VDMOSgds*vds -
-                                          here->VDMOSgm*vgs - here->VDMOSgmbs*vbs);
+                                          here->VDMOSgm*vgs);
             } else {
                 xnrm = 0;
                 xrev = 1;
                 cdreq = -(model->VDMOStype)*(cdrain - here->VDMOSgds*(-vds) -
-                                             here->VDMOSgm*vgd - here->VDMOSgmbs*vbd);
+                                             here->VDMOSgm*vgd);
             }
             *(ckt->CKTrhs + here->VDMOSgNodePrime) -=
-                (model->VDMOStype * (ceqgs + ceqgb + ceqgd));
-            *(ckt->CKTrhs + here->VDMOSbNode) -=
-                (ceqbs + ceqbd - model->VDMOStype * ceqgb);
+                (model->VDMOStype * (ceqgs + ceqgd));
             *(ckt->CKTrhs + here->VDMOSdNodePrime) +=
-                (ceqbd - cdreq + model->VDMOStype * ceqgd);
+                (-cdreq + model->VDMOStype * ceqgd);
             *(ckt->CKTrhs + here->VDMOSsNodePrime) +=
-                cdreq + ceqbs + model->VDMOStype * ceqgs;
+                cdreq + model->VDMOStype * ceqgs;
 
 
             /* quasi saturation
@@ -626,7 +522,7 @@ bypass :
                 double vdsn = model->VDMOStype * (
                     *(ckt->CKTrhsOld + here->VDMOSdNode) -
                     *(ckt->CKTrhsOld + here->VDMOSsNode));
-                double rd = model->VDMOSdrainResistance + model->VDMOSqsResistance * 
+                double rd = model->VDMOSdrainResistance + model->VDMOSqsResistance *
                     (vdsn / (vdsn + fabs(model->VDMOSqsVoltage)));
                 here->VDMOSdrainConductance = 1 / rd;
             }
@@ -638,35 +534,28 @@ bypass :
             *(here->VDMOSDdPtr) += (here->VDMOSdrainConductance + here->VDMOSdsConductance);
             *(here->VDMOSGgPtr) += (here->VDMOSgateConductance); //((gcgd + gcgs + gcgb));
             *(here->VDMOSSsPtr) += (here->VDMOSsourceConductance + here->VDMOSdsConductance);
-            *(here->VDMOSBbPtr) += (here->VDMOSgbd + here->VDMOSgbs + gcgb);
             *(here->VDMOSDPdpPtr) +=
                 (here->VDMOSdrainConductance + here->VDMOSgds +
-                 here->VDMOSgbd + xrev*(here->VDMOSgm + here->VDMOSgmbs) + gcgd);
+                 xrev*(here->VDMOSgm) + gcgd);
             *(here->VDMOSSPspPtr) +=
                 (here->VDMOSsourceConductance + here->VDMOSgds +
-                 here->VDMOSgbs + xnrm*(here->VDMOSgm + here->VDMOSgmbs) + gcgs);
+                 xnrm*(here->VDMOSgm) + gcgs);
             *(here->VDMOSGPgpPtr) +=
-                (here->VDMOSgateConductance) + (gcgd + gcgs + gcgb);
+                (here->VDMOSgateConductance) + (gcgd + gcgs);
             *(here->VDMOSGgpPtr) += (-here->VDMOSgateConductance);
             *(here->VDMOSDdpPtr) += (-here->VDMOSdrainConductance);
             *(here->VDMOSGPgPtr) += (-here->VDMOSgateConductance);
-            *(here->VDMOSGPbPtr) -= gcgb;
             *(here->VDMOSGPdpPtr) -= gcgd;
             *(here->VDMOSGPspPtr) -= gcgs;
             *(here->VDMOSSspPtr) += (-here->VDMOSsourceConductance);
-            *(here->VDMOSBgpPtr) -= gcgb;
-            *(here->VDMOSBdpPtr) -= here->VDMOSgbd;
-            *(here->VDMOSBspPtr) -= here->VDMOSgbs;
             *(here->VDMOSDPdPtr) += (-here->VDMOSdrainConductance);
             *(here->VDMOSDPgpPtr) += ((xnrm - xrev)*here->VDMOSgm - gcgd);
-            *(here->VDMOSDPbPtr) += (-here->VDMOSgbd + (xnrm - xrev)*here->VDMOSgmbs);
             *(here->VDMOSDPspPtr) += (-here->VDMOSgds - xnrm*
-                                      (here->VDMOSgm + here->VDMOSgmbs));
+                                      (here->VDMOSgm));
             *(here->VDMOSSPgpPtr) += (-(xnrm - xrev)*here->VDMOSgm - gcgs);
             *(here->VDMOSSPsPtr) += (-here->VDMOSsourceConductance);
-            *(here->VDMOSSPbPtr) += (-here->VDMOSgbs - (xnrm - xrev)*here->VDMOSgmbs);
             *(here->VDMOSSPdpPtr) += (-here->VDMOSgds - xrev*
-                                      (here->VDMOSgm + here->VDMOSgmbs));
+                                      (here->VDMOSgm));
 
             *(here->VDMOSDsPtr) += (-here->VDMOSdsConductance);
             *(here->VDMOSSdPtr) += (-here->VDMOSdsConductance);
@@ -930,43 +819,17 @@ scalef(double nf2, double vgst)
  */
 
 static double
-cweakinv2(double slope, double shift, double vgst, double vds, double lambda, double beta, double vt, double mtr)
+cweakinv2(double slope, double shift, double vgst, double vds, double lambda, double beta, double vt, double mtr, double theta)
 {
+    double betam = beta / (1.0+theta*vgst);
     vgst += shift * (1 - scalef(0.5, vgst));
     double n = slope / 2.3 / 0.0256; /* Tsividis, p. 208 */
     double n1 = n + (1 - n) * scalef(0.7, vgst); /* n < n1 < 1 */
     double first = log(1 + exp(vgst / (2 * n1 * vt)));
     double second = log(1 + exp((vgst - vds * mtr * n1) / (2 * n1 * vt)));
     double cds =
-        beta * n1 * 2 * vt * vt * (1 + scalef(1, vgst) * lambda * vds) *
+        betam * n1 * 2 * vt * vt * (1 + scalef(1, vgst) * lambda * vds) *
         (first * first - second * second);
     return cds;
 }
 
-
-/* Alternative simple weak inversion model, according to https://www.anasoft.co.uk/MOS1Model.htm 
- * Scale the voltage overdrive vgst logarithmically in weak inversion.
- * Best fits LTSPICE curves with shift=0
- */
-
-static double
-cweakinv(double slope, double shift, double vgst, double vds, double lambda, double beta, double vt, double mtr)
-{
-    NG_IGNORE(vt);
-    double cdrain, betap;
-    vgst = slope * log(1 + exp((vgst - shift) / slope));
-
-    betap = beta*(1 + lambda*vds);
-    /* scale vds with mtr (except with lambda) */
-
-    if (vgst <= vds * mtr) {
-    /* saturation region */
-        cdrain = betap*vgst*vgst*.5;
-    }
-    else {
-        /* linear region */
-        cdrain = betap * vds * mtr *
-            (vgst - .5 * vds * mtr);
-    }
-    return cdrain;
-}

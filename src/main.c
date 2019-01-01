@@ -19,10 +19,14 @@
 # include <readline/history.h>
 #endif
 
-/* SJB added editline support 2005-05-05 */
+/* editline development has added the following typdef to readline.h in 06/2018.
+   It is not vailable with older libedit versions (pre-1.42.2) , thus we have to set it ourselves */
 #ifdef HAVE_BSDEDITLINE
-# include <editline/readline.h>
-extern VFunction *rl_event_hook;    /* missing from editline/readline.h */
+#include <editline/readline.h>
+#ifndef rl_hook_func_t
+    typedef int rl_hook_func_t(void);
+#endif
+extern rl_hook_func_t *rl_event_hook;    /* missing from editline/readline.h */
 extern int rl_catch_signals;        /* missing from editline/readline.h */
 #endif
 
@@ -164,16 +168,10 @@ static void app_rl_readlines(void);
 
 #if defined(HAVE_GNUREADLINE) || defined(HAVE_BSDEDITLINE)
 static char *prompt(void);
-#endif
-
 #ifndef X_DISPLAY_MISSING
 # include "frontend/plotting/x11.h"
-# ifdef HAVE_GNUREADLINE
 static int app_event_func(void);
-# endif
-# ifdef HAVE_BSDEDITLINE
-static void app_event_func(void);
-# endif
+#endif
 #endif
 
 static void show_help(void);
@@ -183,7 +181,6 @@ static bool read_initialisation_file(char *dir, char *name);
 #ifdef SIMULATOR
 static void append_to_stream(FILE *dest, FILE *source);
 #endif
-
 
 extern IFsimulator SIMinfo;
 
@@ -566,7 +563,7 @@ prompt(void)
 #endif /* HAVE_GNUREADLINE || HAVE_BSDEDITLINE */
 
 #ifndef X_DISPLAY_MISSING
-#ifdef HAVE_GNUREADLINE
+#if defined(HAVE_GNUREADLINE) || defined(HAVE_BSDEDITLINE)
 /* -------------------------------------------------------------------------- */
 /* Process device events in Readline's hook since there is no where
    else to do it now - AV */
@@ -579,21 +576,8 @@ app_event_func(void)
     X11_Input(&reqst, NULL);
     return 0;
 }
-#endif /* HAVE_GNUREADLINE */
+#endif
 
-#ifdef HAVE_BSDEDITLINE
-/* -------------------------------------------------------------------------- */
-/* Process device events in Editline's hook.
-   similar to the readline function above but returns void */
-static void
-app_event_func(void)
-/* called by GNU readline periodically to know what to do about keypresses */
-{
-    static REQUEST reqst = { char_option, 0 };
-    reqst.fp = rl_instream;
-    X11_Input(&reqst, NULL);
-}
-#endif /* HAVE_BSDEDITLINE */
 #endif
 
 /* -------------------------------------------------------------------------- */
@@ -657,10 +641,10 @@ app_rl_readlines(void)
                 cp_evloop(expanded_line);
                 add_history(expanded_line);
             }
-            free(expanded_line);
+            tfree(expanded_line);
         }
 
-        free(line);
+        tfree(line);
     }
     /* History gets written in ../fte/misccoms.c com_quit */
 
@@ -864,8 +848,10 @@ main(int argc, char **argv)
 
     cp_program = ft_sim->simulator;
 
-    srand((unsigned int) getpid());
-    TausSeed();
+    /* initialze random number generator with seed = 1 */
+    int ii = 1;
+    cp_vset("rndseed", CP_NUM, &ii);
+    com_sseed(NULL);
 
     /* --- Process command line options --- */
     for (;;) {
@@ -1167,7 +1153,7 @@ main(int argc, char **argv)
         {
             unsigned int rseed = 66;
             initnorm(0, 0);
-            if (!cp_getvar("rndseed", CP_NUM, &rseed)) {
+            if (!cp_getvar("rndseed", CP_NUM, &rseed, 0)) {
                 time_t acttime = time(NULL);
                 rseed = (unsigned int) acttime;
             }
@@ -1175,15 +1161,7 @@ main(int argc, char **argv)
             fprintf(cp_out, "SoS %f, seed value: %ld\n", renormalize(), rseed);
         }
 #elif defined(WaGauss)
-        {
-            unsigned int rseed = 66;
-            if (!cp_getvar("rndseed", CP_NUM, &rseed)) {
-                time_t acttime = time(NULL);
-                rseed = (unsigned int) acttime;
-            }
-            srand(rseed);
-            initw();
-        }
+        initw();
 #endif
 
         if (!ft_servermode) {
@@ -1235,6 +1213,10 @@ main(int argc, char **argv)
                 if (!Infile_Path)
                     Infile_Path = ngdirname(arg);
 
+             /* unquote the input string, needed if it results from double clicking the filename */
+#if defined(HAS_WINGUI)
+                arg = cp_unquote(arg);
+#endif
                 /* Copy all the arguments into the temporary file */
                 tp = fopen(arg, "r");
                 if (!tp) {
@@ -1259,6 +1241,8 @@ main(int argc, char **argv)
 #if defined(HAS_WINGUI)
                 /* write source file name into source window */
                 SetSource(dname);
+                /* free arg that has been unquoted above */
+                tfree(arg);
 #endif
 
                 append_to_stream(tempfile, tp);

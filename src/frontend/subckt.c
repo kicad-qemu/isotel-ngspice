@@ -98,6 +98,8 @@ static wordlist *modtranslate(struct card *deck, char *subname, wordlist *new_mo
 static void devmodtranslate(struct card *deck, char *subname, wordlist * const orig_modnames);
 static int inp_numnodes(char c);
 
+#define N_GLOBAL_NODES 1005
+
 /*---------------------------------------------------------------------
  * table is used in settrans and gettrans -- it holds the netnames used
  * in the .subckt definition (t_old), and in the subcircuit invocation
@@ -106,7 +108,7 @@ static int inp_numnodes(char c);
 static struct tab {
     char *t_old;
     char *t_new;
-} table[512];   /* That had better be enough. */
+} table[N_GLOBAL_NODES];   /* That had better be enough. */
 
 
 /*---------------------------------------------------------------------
@@ -131,7 +133,7 @@ static bool use_numparams = FALSE;
 
 static char start[32], sbend[32], invoke[32], model[32];
 
-static char *global_nodes[128];
+static char *global_nodes[N_GLOBAL_NODES];
 static int num_global_nodes;
 
 
@@ -151,6 +153,10 @@ collect_global_nodes(struct card *c)
             char *s = c->line;
             s = nexttok(s);
             while (*s) {
+                if (num_global_nodes == N_GLOBAL_NODES) {
+                    fprintf(stderr, "ERROR, N_GLOBAL_NODES overflow\n");
+                    controlled_exit(EXIT_FAILURE);
+                }
                 char *t = skip_non_ws(s);
                 global_nodes[num_global_nodes++] = copy_substring(s, t);
                 s = skip_ws(t);
@@ -207,18 +213,18 @@ inp_subcktexpand(struct card *deck) {
     struct card *c;
     wordlist *modnames = NULL;
 
-    if (!cp_getvar("substart", CP_STRING, start))
+    if (!cp_getvar("substart", CP_STRING, start, sizeof(start)))
         strcpy(start, ".subckt");
-    if (!cp_getvar("subend", CP_STRING, sbend))
+    if (!cp_getvar("subend", CP_STRING, sbend, sizeof(sbend)))
         strcpy(sbend, ".ends");
-    if (!cp_getvar("subinvoke", CP_STRING, invoke))
+    if (!cp_getvar("subinvoke", CP_STRING, invoke, sizeof(invoke)))
         strcpy(invoke, "x");
-    if (!cp_getvar("modelcard", CP_STRING, model))
+    if (!cp_getvar("modelcard", CP_STRING, model, sizeof(model)))
         strcpy(model, ".model");
-    if (!cp_getvar("modelline", CP_STRING, model))
+    if (!cp_getvar("modelline", CP_STRING, model, sizeof(model)))
         strcpy(model, ".model");
 
-    use_numparams = cp_getvar("numparams", CP_BOOL, NULL);
+/*    use_numparams = cp_getvar("numparams", CP_BOOL, NULL, 0); */
 
     use_numparams = TRUE;
 
@@ -237,8 +243,11 @@ inp_subcktexpand(struct card *deck) {
             if (ciprefix(".subckt", c->line))
                 nupa_scan(c);
         /* now copy instances */
-        for (c = deck; c; c = c->nextcard)  /* first Numparam pass */
+        for (c = deck; c; c = c->nextcard) {  /* first Numparam pass */
+            if (*(c->line) == '*')
+                continue;
             c->line = nupa_copy(c);
+        }
 
 #ifdef TRACE
         fprintf(stderr, "Numparams transformed deck:\n");
@@ -719,7 +728,7 @@ struct card *
 inp_deckcopy_oc(struct card *deck)
 {
     struct card *d = NULL, *nd = NULL;
-    int skip_control = 0;
+    int skip_control = 0, i = 0;
 
     while (deck) {
         /* exclude any command inside .control ... .endc */
@@ -744,7 +753,8 @@ inp_deckcopy_oc(struct card *deck)
         else {
             nd = d = TMALLOC(struct card, 1);
         }
-        d->linenum = deck->linenum;
+        d->linenum_orig = deck->linenum;
+        d->linenum = i++;
         d->line = copy(deck->line);
         if (deck->error)
             d->error = copy(deck->error);
@@ -1246,7 +1256,7 @@ translate(struct card *deck, char *formal, char *actual, char *scname, const cha
     }
     rtn = 1;
  quit:
-    for (i = 0; ; i++) {
+    for (i = 0; i < N_GLOBAL_NODES; i++) {
         if (!table[i].t_old && !table[i].t_new)
             break;
         FREE(table[i].t_old);
@@ -1336,9 +1346,9 @@ settrans(char *formal, char *actual, const char *subname)
 {
     int i;
 
-    memset(table, 0, sizeof(*table));
+    memset(table, 0, N_GLOBAL_NODES * sizeof(*table));
 
-    for (i = 0; ; i++) {
+    for (i = 0; i < N_GLOBAL_NODES; i++) {
         table[i].t_old = gettok(&formal);
         table[i].t_new = gettok(&actual);
 
@@ -1351,6 +1361,11 @@ settrans(char *formal, char *actual, const char *subname)
                 return 1;       /* Too many actual / too few formal */
         }
     }
+    if (i == N_GLOBAL_NODES) {
+        fprintf(stderr, "ERROR, N_GLOBAL_NODES overflow\n");
+        controlled_exit(EXIT_FAILURE);
+    }
+
     return 0;
 }
 
@@ -1462,12 +1477,12 @@ numnodes(const char *line, struct subs *subs, wordlist const *modnames)
         /* "while" cycle increments the counter even when a model is */
         /* recognized. This code may be better!                      */
 
-        if ((i < 4) && (c == 'q')) {
-            fprintf(cp_err, "Error: too few nodes for BJT: %s\n", line);
+        if ((i < 4) && ((c == 'm') || (c == 'q'))) {
+            fprintf(cp_err, "Error: too few nodes for MOS or BJT: %s\n", line);
             return (0);
         }
-        if ((i < 5) && ((c == 'm') || (c == 'p'))) {
-            fprintf(cp_err, "Error: too few nodes for MOS or CPL: %s\n", line);
+        if ((i < 5) && (c == 'p')) {
+            fprintf(cp_err, "Error: too few nodes for CPL: %s\n", line);
             return (0);
         }
         return (i-1); /* compensate the unnecessary increment in the while cycle */

@@ -1,5 +1,7 @@
 ** npn bipolar: table 2D (Vce, Ib) compared to q model
 * bipolar transistor qinn from National Semi op-amp clc409
+* please run the table generator table-generator-q-2d.sp in ngspice to
+* create the table data file qinn-clc409-2d-1.table as required here
 
 ** Circuit Description **
 Q3 2 1 3 QINN
@@ -12,6 +14,7 @@ ib2 0 bb 2u
 vce2 cc 0 1
 vee2 ee 0 0
 
+* set a simulation temperature
 .options temp=1
 
 .subckt tbqnpn c b e
@@ -37,7 +40,7 @@ Dbe b bint DMOD
 dc vce 0 5 0.05 ib 0.2u 1.8u 0.4u
 *plot i(vee)
 *plot v(1) ylimit 0 1
-
+reset
 * bipolar from table
 dc vce2 0 5 0.05 ib2 0.2u 1.8u 0.4u
 

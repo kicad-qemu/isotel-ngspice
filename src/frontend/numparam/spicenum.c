@@ -186,7 +186,8 @@ findsubname(dico_t *dico, SPICE_DSTRINGPTR dstr_p)
             char *t;
             entry_t *entry;
             /* check for known subckt name */
-            if (inp_compat_mode == COMPATMODE_PS)
+            if (inp_compat_mode == COMPATMODE_PS || inp_compat_mode == COMPATMODE_PSA
+                || inp_compat_mode == COMPATMODE_LTPS || inp_compat_mode == COMPATMODE_LTPSA)
                 for (t = p; alfanumps(*t); t++)
                     ;
             else
@@ -359,7 +360,7 @@ nupa_done(void)
 
     if (nerrors) {
         bool is_interactive = FALSE;
-        if (cp_getvar("interactive", CP_BOOL, NULL))
+        if (cp_getvar("interactive", CP_BOOL, NULL, 0))
             is_interactive = TRUE;
         printf(" Copies=%d Evals=%d Placeholders=%ld Symbols=%d Errors=%d\n",
                linecountS, evalcountS, placeholder, dictsize, nerrors);
@@ -598,7 +599,7 @@ nupa_copy(struct card *deck)
         dicoS->dyncategory[linenum] = c;
     } /* keep a local copy and mangle the string */
 
-    t = strdup(spice_dstring_value(&u));
+    t = copy(spice_dstring_value(&u));
 
     if (!t) {
         fputs("Fatal: String malloc crash in nupa_copy()\n", stderr);

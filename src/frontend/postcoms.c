@@ -28,12 +28,27 @@ Author: 1985 Wayne A. Christopher, U. C. Berkeley CAD Group
 static void killplot(struct plot *pl);
 static void DelPlotWindows(struct plot *pl);
 
+/* check if the user want's to delete the scale vector of the current plot.
+   This should not happen, because then redrawing the graph crashes ngspice */
+static bool
+check_cp(char* vecname)
+{
+    if (plot_cur && plot_cur->pl_scale && plot_cur->pl_scale->v_name && eq(plot_cur->pl_scale->v_name, vecname)) {
+        fprintf(cp_err, "\nWarning: Scale vector '%s' of current plot cannot be deleted!\n", vecname);
+        fprintf(cp_err, "    Command 'unlet %s' is ignored.\n\n", vecname);
+        return TRUE;
+    }
+    else
+        return FALSE;
+}
 
 void
 com_unlet(wordlist *wl)
 {
     while (wl) {
-        vec_remove(wl->wl_word);
+        /* don't delete the scale vector of the current plot */
+        if (!check_cp(wl->wl_word))
+            vec_remove(wl->wl_word);
         wl = wl->wl_next;
     }
 }
@@ -143,7 +158,7 @@ com_print(wordlist *wl)
 
     out_init();
     if (!col) {
-        if (cp_getvar("width", CP_NUM, &i))
+        if (cp_getvar("width", CP_NUM, &i, 0))
             width = i;
         if (width < 60)
             width = 60;
@@ -219,7 +234,7 @@ com_print(wordlist *wl)
             }  //end  if (v->v_rlength == 1)
         }  // end for loop
     } else {    /* Print in columns. */
-        if (cp_getvar("width", CP_NUM, &i))
+        if (cp_getvar("width", CP_NUM, &i, 0))
             width = i;
         if (width < 40)
             width = 40;
@@ -227,16 +242,16 @@ com_print(wordlist *wl)
             buf = TREALLOC(char, buf, width + 1);
             buf2 = TREALLOC(char, buf2, width + 1);
         }
-        if (cp_getvar("height", CP_NUM, &i))
+        if (cp_getvar("height", CP_NUM, &i, 0))
             height = i;
         if (height < 20)
             height = 20;
-        nobreak = cp_getvar("nobreak", CP_BOOL, NULL);
+        nobreak = cp_getvar("nobreak", CP_BOOL, NULL, 0);
         if (!nobreak && !ft_nopage)
             nobreak = FALSE;
         else
             nobreak = TRUE;
-        noprintscale = cp_getvar("noprintscale", CP_BOOL, NULL);
+        noprintscale = cp_getvar("noprintscale", CP_BOOL, NULL, 0);
         bv = vecs;
     nextpage:
         /* Make the first vector of every page be the scale... */
@@ -273,7 +288,6 @@ com_print(wordlist *wl)
         out_send("\n");
         out_send(buf2);
         (void) sprintf(buf, "%s  %s", p->pl_name, p->pl_date);
-        j = (width - (int) strlen(buf)) / 2;
         out_send(buf);
         out_send("\n");
         for (i = 0; i < width; i++)
@@ -397,7 +411,7 @@ com_write(wordlist *wl)
         file = ft_rawfile;
     }
 
-    if (cp_getvar("filetype", CP_STRING, buf)) {
+    if (cp_getvar("filetype", CP_STRING, buf, sizeof(buf))) {
         if (eq(buf, "binary"))
             ascii = FALSE;
         else if (eq(buf, "ascii"))
@@ -405,7 +419,7 @@ com_write(wordlist *wl)
         else
             fprintf(cp_err, "Warning: strange file type %s\n", buf);
     }
-    appendwrite = cp_getvar("appendwrite", CP_BOOL, NULL);
+    appendwrite = cp_getvar("appendwrite", CP_BOOL, NULL, 0);
 
     if (wl)
         names = ft_getpnames(wl, TRUE);
@@ -863,6 +877,9 @@ killplot(struct plot *pl)
         if (pl == plot_cur)
             plot_cur = op;
     }
+    /* delete the hash table entry for this plot */
+    if (pl->pl_lookup_table)
+        nghash_free(pl->pl_lookup_table, NULL, NULL);
     tfree(pl->pl_title);
     tfree(pl->pl_name);
     tfree(pl->pl_typename);

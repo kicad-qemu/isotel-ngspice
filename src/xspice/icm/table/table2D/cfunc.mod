@@ -29,6 +29,7 @@ AUTHORS
 
 MODIFICATIONS
 
+    10 Aug 2018     Holger Vogt
 
 SUMMARY
 
@@ -88,7 +89,6 @@ NON-STANDARD FEATURES
 
 #if defined(_MSC_VER)
 #define strdup _strdup
-#define snprintf _snprintf
 #endif
 
 /*=== LOCAL VARIABLES & TYPEDEFS =======*/
@@ -291,6 +291,27 @@ cnv_get_spice_value(char   *str,       /* IN - The value text e.g. 1.2K */
     return OK;
 }
 
+static void
+cm_table2D_callback(ARGS, Mif_Callback_Reason_t reason)
+{
+    switch (reason) {
+        case MIF_CB_DESTROY: {
+            int i;
+            Local_Data_t *loc = STATIC_VAR (locdata);
+            free(loc->state);
+            for (i = 0; i < loc->iy; i++)
+               free(loc->table[i]);
+            free(loc->table);
+            free(loc->xcol);
+            free(loc->ycol);
+            sf_eno2_close (loc->newtable);
+            free(loc);
+            break;
+        }
+    }
+}
+
+
 
 /*==============================================================================
 
@@ -380,6 +401,8 @@ cm_table2D(ARGS)   /* structure holding parms, inputs, outputs, etc. */
         size_t lTotalChars;  /* Total characters read */
         int   interporder;   /* order of interpolation for eno */
 
+        CALLBACK = cm_table2D_callback;
+
         /* allocate static storage for *loc */
         STATIC_VAR (locdata) = calloc(1, sizeof(Local_Data_t));
         loc = STATIC_VAR (locdata);
@@ -420,6 +443,8 @@ cm_table2D(ARGS)   /* structure holding parms, inputs, outputs, etc. */
             cm_message_printf("Insufficient memory to read file %s", PARAM(file));
             loc->state->atend = 1;
             loc->init_err = 1;
+            if(cFile) free(cFile);
+            if(cThisLine) free(cThisLine);
             return;
         }
         /* read whole file into cFile */
@@ -594,10 +619,7 @@ cm_table2D(ARGS)   /* structure holding parms, inputs, outputs, etc. */
         /* fill table data into eno2 structure */
         sf_eno2_set (loc->newtable, table_data /* data [n2][n1] */);
 
-        /* free all the emory allocated */
-        // for (i = 0; i < iy; i++)
-        //     free(table_data[i]);
-        // free(table_data);
+        /* free the file memory allocated */
         free(cFile);
         free(cThisLine);
     } /* end of initialization "if (INIT == 1)" */

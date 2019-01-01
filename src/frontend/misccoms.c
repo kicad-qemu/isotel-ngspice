@@ -7,6 +7,7 @@ Author: 1985 Wayne A. Christopher, U. C. Berkeley CAD Group
 #include "ngspice/cpdefs.h"
 #include "ngspice/ftedefs.h"
 #include "ngspice/dvec.h"
+#include "ngspice/iferrmsg.h"
 #include "ftehelp.h"
 #include "ngspice/hlpdefs.h"
 #include "misccoms.h"
@@ -31,6 +32,10 @@ extern char history_file[];
 extern char history_file[];
 #endif
 
+#ifdef SHARED_MODULE
+extern void rem_controls(void);
+#endif
+
 extern IFsimulator SIMinfo;
 extern void spice_destroy_devices(void); /* FIXME need a better place */
 static void byemesg(void);
@@ -45,7 +50,7 @@ com_quit(wordlist *wl)
     bool noask =
         (wl  &&  wl->wl_word  &&  1 == sscanf(wl->wl_word, "%d", &exitcode)) ||
         (wl  &&  wl->wl_word  &&  cieq(wl->wl_word, "noask"))  ||
-        !cp_getvar("askquit", CP_BOOL, NULL);
+        !cp_getvar("askquit", CP_BOOL, NULL, 0);
 
     /* update screen and reset terminal */
     gr_clean();
@@ -56,11 +61,6 @@ com_quit(wordlist *wl)
         if (!noask && !confirm_quit())
             return;
 
-#ifndef SHARED_MODULE
-	if (!ft_ngdebug)
-	    exit(exitcode);
-#endif
-
     /* start to clean up the mess */
 
 #ifdef SHARED_MODULE
@@ -68,7 +68,6 @@ com_quit(wordlist *wl)
         wordlist all = { "all", NULL, NULL };
         wordlist star = { "*", NULL, NULL };
 
-//      com_remcirc(NULL);
         com_destroy(&all);
         com_unalias(&star);
         com_undefine(&star);
@@ -80,43 +79,28 @@ com_quit(wordlist *wl)
         cp_remvar("program");
         cp_remvar("prompt");
     }
-#endif
 
-#ifdef EXPERIMENTAL_CODE
-    /* Destroy CKT when quit. Add by Gong Ding, gdiso@ustc.edu */
-    if (!ft_nutmeg) {
-        struct circ *cc;
-        for (cc = ft_circuits; cc; cc = cc->ci_next)
-            if (SIMinfo.deleteCircuit)
-                SIMinfo.deleteCircuit(cc->ci_ckt);
-    }
-#endif
+    rem_controls();
 
-#ifdef SHARED_MODULE
     /* Destroy CKT when quit. */
     if (!ft_nutmeg) {
         while(ft_curckt)
             com_remcirc(NULL);
     }
-#endif
-
-    DevSwitch(NULL);
-    DevSwitch(NULL);
-
-    /* then go away */
-
-#ifdef SHARED_MODULE
     cp_destroy_keywords();
     destroy_ivars();
+#else
+    while (ft_curckt)
+        com_remcirc(NULL);
 #endif
 
+    tfree(errMsg);
     byemesg();
+
 #ifdef SHARED_MODULE
     destroy_const_plot();
     spice_destroy_devices();
-#endif
-    mc_free();
-#ifdef SHARED_MODULE
+
     /* add 1000 to notify that we exit from 'quit' */
     controlled_exit(1000 + exitcode);
 #else

@@ -47,7 +47,7 @@ agauss(double nominal_val, double abs_variation, double sigma)
 {
     double stdvar;
     stdvar = abs_variation / sigma;
-    return (nominal_val + stdvar * gauss0());
+    return (nominal_val + stdvar * gauss1());
 }
 
 
@@ -56,7 +56,7 @@ gauss(double nominal_val, double rel_variation, double sigma)
 {
     double stdvar;
     stdvar = nominal_val * rel_variation / sigma;
-    return (nominal_val + stdvar * gauss0());
+    return (nominal_val + stdvar * gauss1());
 }
 
 
@@ -239,7 +239,6 @@ void
 initdico(dico_t *dico)
 {
     int asize = 10;           /* default allocation depth of the synbol stack */
-    COMPATMODE_T compat_mode;
 
     dico->srcline = -1;
     dico->errcount = 0;
@@ -409,7 +408,7 @@ attrib(dico_t *dico, NGHASHPTR htable_p, char *t, char op)
 
     if (!entry) {
         entry = TMALLOC(entry_t, 1);
-        entry->symbol = strdup(t);
+        entry->symbol = copy(t);
         entry->tp = NUPA_UNKNOWN;      /* signal Unknown */
         entry->level = dico->stack_depth;
         nghash_insert(htable_p, t, entry);

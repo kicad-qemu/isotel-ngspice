@@ -104,17 +104,17 @@ gr_init(double *xlims, double *ylims, /* The size of the screen. */
     cur.plotno = 0;
 
     /* note: should do only once, maybe in gr_init_once */
-    if (!cp_getvar("pointchars", CP_STRING, pointchars))
+    if (!cp_getvar("pointchars", CP_STRING, pointchars, sizeof(pointchars)))
         (void) strcpy(pointchars, DEFPOINTCHARS);
 
-    if (!cp_getvar("ticmarks", CP_NUM, &graph->ticmarks)) {
-        if (cp_getvar("ticmarks", CP_BOOL, NULL))
+    if (!cp_getvar("ticmarks", CP_NUM, &graph->ticmarks, 0)) {
+        if (cp_getvar("ticmarks", CP_BOOL, NULL, 0))
             graph->ticmarks = 10;
         else
             graph->ticmarks = 0;
     }
 
-    if (cp_getvar("ticlist", CP_LIST, ticlist)) {
+    if (cp_getvar("ticlist", CP_LIST, ticlist, 0)) {
         wl = vareval("ticlist");
         ticlist = wl_flatten(wl);
         graph->ticdata = readtics(ticlist);
@@ -276,7 +276,7 @@ gr_point(struct dvec *dv,
             for (; *tics < HUGE; tics++)
                 if (*tics == (double) np) {
                     DevDrawText("x", (int) (tox - currentgraph->fontwidth / 2),
-                                (int) (toy - currentgraph->fontheight / 2));
+                                (int) (toy - currentgraph->fontheight / 2), 0);
                     /* gr_redraw will redraw this w/o our having to save it
                        Guenther Roehrich 22-Jan-99 */
                     /*    SaveText(currentgraph, "x",
@@ -289,7 +289,7 @@ gr_point(struct dvec *dv,
         {
             /* Draw an 'x' */
             DevDrawText("x", (int) (tox - currentgraph->fontwidth / 2),
-                        (int) (toy - currentgraph->fontheight / 2));
+                        (int) (toy - currentgraph->fontheight / 2), 0);
             /* gr_redraw will redraw this w/o our having to save it
                Guenther Roehrich 22-Jan-99 */
             /*  SaveText(currentgraph, "x",
@@ -308,7 +308,7 @@ gr_point(struct dvec *dv,
         pointc[0] = (char) dv->v_linestyle;
         pointc[1] = '\0';
         DevDrawText(pointc, (int) (tox - currentgraph->fontwidth / 2),
-                    (int) (toy - currentgraph->fontheight / 2));
+                    (int) (toy - currentgraph->fontheight / 2), 0);
     default:
         break;
     }
@@ -415,14 +415,14 @@ drawlegend(GRAPH *graph, int plotno, struct dvec *dv)
     if (graph->plottype == PLOT_POINT) {
         (void) sprintf(buf, "%c : ", dv->v_linestyle);
         DevDrawText(buf, x + graph->viewport.width / 20
-                    - 3 * graph->fontwidth, y);
+                    - 3 * graph->fontwidth, y, 0);
     } else {
         SetLinestyle(dv->v_linestyle);
         DevDrawLine(x, i, x + graph->viewport.width / 20, i);
     }
     SetColor(1);
     DevDrawText(dv->v_name, x + graph->viewport.width / 20
-                + graph->fontwidth, y);
+                + graph->fontwidth, y, 0);
 }
 
 
@@ -445,14 +445,14 @@ gr_pmsg(char *text)
 
     DevUpdate();
 
-    if (cp_getvar("device", CP_STRING, buf) && !(strcmp("/dev/tty", buf) == 0))
+    if (cp_getvar("device", CP_STRING, buf, sizeof(buf)) && !(strcmp("/dev/tty", buf) == 0))
         fprintf(cp_err, "%s", text);
     else if (currentgraph->grid.xlabel)
         /* MW. grid.xlabel may be NULL */
         DevDrawText(text, currentgraph->viewport.width -
                     (int) (strlen(currentgraph->grid.xlabel) + 3) *
                     currentgraph->fontwidth,
-                    currentgraph->absolute.height - currentgraph->fontheight);
+                    currentgraph->absolute.height - currentgraph->fontheight, 0);
     else
         fprintf(cp_err, " %s \n", text);
 
@@ -581,7 +581,7 @@ gr_restoretext(GRAPH *graph)
     /* restore text */
     for (k = graph->keyed; k; k = k->next) {
         SetColor(k->colorindex);
-        DevDrawText(k->text, k->x, k->y);
+        DevDrawText(k->text, k->x, k->y, 0);
     }
 }
 

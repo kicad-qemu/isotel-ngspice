@@ -393,7 +393,7 @@ if_option(CKTcircuit *ckt, char *name, enum cp_types type, void *value)
 {
     IFvalue pval;
     int err;
-    char **vv;
+    char **vv, *sfree = NULL;
     int which = -1;
     IFparm *if_parm;
 
@@ -466,7 +466,7 @@ if_option(CKTcircuit *ckt, char *name, enum cp_types type, void *value)
         break;
     case IF_STRING:
         if (type == CP_STRING)
-            pval.sValue = copy((char*) value);
+            sfree = pval.sValue = copy((char*) value);
         else
             goto badtype;
         break;
@@ -502,6 +502,7 @@ if_option(CKTcircuit *ckt, char *name, enum cp_types type, void *value)
                                         if_parm->id, &pval,
                                         NULL)) != OK)
         ft_sperror(err, "setAnalysisParm(options) ci_curOpt");
+    tfree(sfree);
     return 1;
 #endif
 
@@ -659,7 +660,7 @@ spif_getparam_special(CKTcircuit *ckt, char **name, char *param, int ind, int do
                     {
                         char *x = tv->va_name;
                         tv->va_name = tprintf("%s [%s]", tv->va_name, device->instanceParms[i].keyword);
-                        free(x);
+                        tfree(x);
                     }
                     if (vv)
                         tv->va_next = vv;
@@ -704,7 +705,7 @@ spif_getparam_special(CKTcircuit *ckt, char **name, char *param, int ind, int do
                     {
                         char *x = tv->va_name;
                         tv->va_name = tprintf("%s [%s]", tv->va_name, device->modelParms[i].keyword);
-                        free(x);
+                        tfree(x);
                     }
                     /* tv->va_string = device->modelParms[i].keyword;   Put the name of the variable */
                     if (vv)
@@ -1300,7 +1301,7 @@ if_getstat(CKTcircuit *ckt, char *name)
                                           if_parm->id, &parm,
                                           NULL) == -1)
             {
-                fprintf(cp_err, "if_getstat: Internal Error: can't get %s\n", name);
+                fprintf(cp_err, "if_getstat: Internal Error: can't get a name\n");
                 return (NULL);
             }
 

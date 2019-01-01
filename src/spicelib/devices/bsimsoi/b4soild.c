@@ -610,7 +610,7 @@ int B4SOILoadOMP(B4SOIinstance *here, CKTcircuit *ckt) {
             if ((vds == 0.0) && (vgs == 0.0) && (vbs == 0.0) &&
                     ((ckt->CKTmode & (MODETRAN | MODEAC|MODEDCOP |
                                       MODEDCTRANCURVE)) || (!(ckt->CKTmode & MODEUIC))))
-            {   vbs = 0.0;
+            {
                 /*                vgs = model->B4SOItype*0.1 + here->B4SOIvth0; */
                 vgs = model->B4SOItype * here->B4SOIvth0 + 0.1; /* v4.0 */
                 vds = 0.0;
@@ -1708,8 +1708,7 @@ int B4SOILoadOMP(B4SOIinstance *here, CKTcircuit *ckt) {
             dVbs_dVb = 1.0;
             dVbs_dVe = 0.0;
             dVbs_dT = 0.0;
-            if (selfheat)  dVbsmos_dT = 0.0;
-            else  dVbsmos_dT = 0.0;
+            dVbsmos_dT = 0.0;
 
             Vbp = Vbs - Vps;
             dVbp_dVb = 1;

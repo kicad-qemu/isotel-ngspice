@@ -132,7 +132,7 @@ X11_Init(void)
     char *argv[2];
     int argc = 2;
 
-    if (cp_getvar("display", CP_STRING, buf)) {
+    if (cp_getvar("display", CP_STRING, buf, sizeof(buf))) {
         displayname = buf;
     } else if (!(displayname = getenv("DISPLAY"))) {
         internalerror("Can't open X display.");
@@ -233,7 +233,7 @@ initcolors(GRAPH *graph)
 
         for (i = 0; i < xmaxcolors; i++) {
             (void) sprintf(buf, "color%d", i);
-            if (!cp_getvar(buf, CP_STRING, colorstring))
+            if (!cp_getvar(buf, CP_STRING, colorstring, sizeof(colorstring)))
                 (void) strcpy(colorstring, colornames[i]);
             if (!XAllocNamedColor(display,
                                   DefaultColormap(display, DefaultScreen(display)),
@@ -287,7 +287,7 @@ handlekeypressed(Widget w, XtPointer client_data, XEvent *ev, Boolean *continue_
     PushGraphContext(graph);
     text[nbytes] = '\0';
     SetColor(1);
-    DevDrawText(text, keyev->x, graph->absolute.height - keyev->y);
+    DevDrawText(text, keyev->x, graph->absolute.height - keyev->y, 0);
     /* save it */
     SaveText(graph, text, keyev->x, graph->absolute.height - keyev->y);
     /* warp mouse so user can type in sequence */
@@ -425,7 +425,7 @@ X11_NewViewport(GRAPH *graph)
     XtAddCallback(DEVDEP(graph).buttons[1], XtNcallback, hardcopy, graph);
 
     /* set up fonts */
-    if (!cp_getvar("xfont", CP_STRING, fontname))
+    if (!cp_getvar("xfont", CP_STRING, fontname, sizeof(fontname)))
         (void) strcpy(fontname, DEF_FONT);
 
     for (p = fontname; *p && *p <= ' '; p++)
@@ -529,7 +529,7 @@ X11_Arc(int x0, int y0, int radius, double theta, double delta_theta)
 {
     int t1, t2;
 
-    if (0 && !cp_getvar("x11lineararcs", CP_BOOL, NULL))
+    if (0 && !cp_getvar("x11lineararcs", CP_BOOL, NULL, 0))
         linear_arc(x0, y0, radius, theta, delta_theta);
 
     if (DEVDEP(currentgraph).isopen) {
@@ -549,10 +549,11 @@ X11_Arc(int x0, int y0, int radius, double theta, double delta_theta)
 
 /* note: x and y are the LOWER left corner of text */
 int
-X11_Text(char *text, int x, int y)
+X11_Text(char *text, int x, int y, int angle)
 {
     /* We specify text position by lower left corner, so have to adjust for
        X11's font nonsense. */
+    NG_IGNORE(angle);
 
     if (DEVDEP(currentgraph).isopen)
         XDrawString(display, DEVDEP(currentgraph).window,
@@ -668,7 +669,7 @@ X_ScreentoData(GRAPH *graph, int x, int y, double *fx, double *fy)
     {
         lmin = log10(graph->datawindow.ymin);
         lmax = log10(graph->datawindow.ymax);
-        *fy = exp(((graph->absolute.height - y - graph->viewportxoff)
+        *fy = exp(((graph->absolute.height - y - graph->viewportyoff)
                    * (lmax - lmin) / graph->viewport.height + lmin)
                   * M_LN10);
     } else {
@@ -837,7 +838,7 @@ zoomin(GRAPH *graph)
 
         /* hack for Gordon Jacobs */
         /* add to history list if plothistory is set */
-        if (cp_getvar("plothistory", CP_BOOL, NULL)) {
+        if (cp_getvar("plothistory", CP_BOOL, NULL, 0)) {
             wl = cp_parse(buf);
             (void) cp_addhistent(cp_event++, wl);
         }
@@ -1058,7 +1059,8 @@ X11_Input(REQUEST *request, RESPONSE *response)
 
     default:
         internalerror("unrecognized input type");
-        response->option = error_option;
+        if (response)
+            response->option = error_option;
         return 1;
         break;
     }

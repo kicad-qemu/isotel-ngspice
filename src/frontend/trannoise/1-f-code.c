@@ -104,8 +104,8 @@ f_alpha(int n_pts, int n_exp, double X[], double Q_d, double alpha)
 
 #endif
 
-    free(hfa);
-    free(wfa);
+    tfree(hfa);
+    tfree(wfa);
     /* fft tables will be freed in vsrcaccept.c and isrcaccept.c
        fftFree(); */
     fprintf(stdout, "%d 1/f noise values in time domain created\n", n_pts);
@@ -119,7 +119,7 @@ trnoise_state_gen(struct trnoise_state *this, CKTcircuit *ckt)
 {
     if (this->top == 0) {
 
-        if (cp_getvar("notrnoise", CP_BOOL, NULL))
+        if (cp_getvar("notrnoise", CP_BOOL, NULL, 0))
             this -> NA = this -> TS = this -> NALPHA = this -> NAMP =
                 this -> RTSAM = this -> RTSCAPT = this -> RTSEMT = 0.0;
 
@@ -142,6 +142,7 @@ trnoise_state_gen(struct trnoise_state *this, CKTcircuit *ckt)
             }
 #endif
 
+            tfree(this->oneof); /* FIXME, this is just a trivial trial to avoid memory leaks */
             this->oneof = TMALLOC(double, newsteps);
             this->oneof_length = newsteps;
 
@@ -239,4 +240,13 @@ trrandom_state_init(int rndtype, double TS, double TD, double PARAM1, double PAR
     this->value = 0.0;
 
     return this;
+}
+
+void
+trnoise_state_free(struct trnoise_state *this)
+{
+    if (!this)
+        return;
+    tfree(this->oneof);
+    tfree(this);
 }

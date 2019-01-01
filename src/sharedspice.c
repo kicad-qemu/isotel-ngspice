@@ -1,4 +1,4 @@
-/* Copyright 2013 Holger Vogt
+/* Copyright 2013 - 2018 Holger Vogt
  *
  * Modified BSD license
  */
@@ -10,7 +10,7 @@
 /*******************/
 
 #ifdef _MSC_VER
-#define SHAREDSPICE_version "28.0"
+#define SHAREDSPICE_version "30.0"
 #define STDIN_FILENO    0
 #define STDOUT_FILENO   1
 #define STDERR_FILENO   2
@@ -22,11 +22,31 @@
    via a new thread. Delays may occur. */
 #define low_latency
 
+/************* About threads in sharedspice.c *************************
+   If the calling (main) thread loads a circuit, the .control section
+   commands in the input file are executed immediately by the calling
+   thread after the ciruit has been parsed and loaded.
+   Command bg_run from the calling thread then immediately starts the
+   background thread (id. tid) that issues the 'run' command to
+   start the simulation in this thread. The main thread returns to the
+   caller. .control commands typically are executed prematurely before
+   bg_run has returned.
+   If the flag 'set controlswait' is given in the .control section,
+   all commands following are assembled in the wordlist 'shcontrols',
+   a new thread is started (id: tid2) and suspended immediately. Only
+   when the background thread tid (and thus the simulation) is ready,
+   the tid2 thread is released and the .control commands are executed.
+   Before a repeated 'bg_run' is given, or after a 'reset', the command
+   'bg_ctrl' has to be sent by the caller to re-start and suspend the
+   thread tid2, using the still existing shcontrols.
+*/
+
 /**********************************************************************/
 /*              Header files for C functions                          */
 /**********************************************************************/
 
 #include <stdio.h>
+#include <string.h>
 #include <setjmp.h>
 
 /* workaround since fputs, putc are replaced by sh_fputs,
@@ -94,6 +114,8 @@ typedef HANDLE threadId_t;
 typedef pthread_mutex_t mutexType;
 typedef pthread_t threadId_t;
 #define THREADS
+static pthread_cond_t cond = PTHREAD_COND_INITIALIZER;
+static bool cont_condition;
 
 #endif
 
@@ -127,10 +149,6 @@ typedef pthread_t threadId_t;
 #include "misc/ivars.h"
 #include "frontend/resource.h"
 #include "frontend/com_measure2.h"
-#ifdef _MSC_VER
-#include <stdio.h>
-#define snprintf _snprintf
-#endif
 #include "frontend/outitf.h"
 #include "ngspice/memory.h"
 #include "frontend/com_measure2.h"
@@ -164,6 +182,12 @@ typedef void (*sighandler)(int);
 #define S_IRWXU _S_IWRITE
 #endif
 
+
+#ifdef XSPICE
+#include "ngspice/evtshared.h"
+extern bool wantevtdata;
+#endif
+
 extern IFfrontEnd nutmeginfo;
 
 extern struct comm spcp_coms[ ];
@@ -172,17 +196,12 @@ extern int SIMinit(IFfrontEnd *frontEnd, IFsimulator **simulator);
 extern wordlist *cp_varwl(struct variable *var);
 extern void create_circbyline(char *line);
 
-#ifdef XSPICE
-extern struct evt_shared_data *EVTshareddata(char *node_name);
-extern char** EVTallnodes(void);
-extern bool wantevtdata;
-#endif
-
+void exec_controls(wordlist *shcontrols);
+void rem_controls(void);
 
 /*The current run (to get variable names, etc)*/
 static runDesc *cur_run;
 
-void sh_stdflush(FILE *f);
 double getisrcval(double time, char *iname);
 
 int sh_fputsll(const char *input, FILE* outf);
@@ -199,6 +218,13 @@ void wl_delete_first(wordlist **wlstart, wordlist **wlend);
 
 int add_bkpt(void);
 int sharedsync(double*, double*, double, double, double, int, int*, int);
+
+void sh_delete_myvec(void);
+
+#ifdef XSPICE
+void shared_send_event(int, double, double, char *, void *, int, int);
+void shared_send_dict(int, int, char*, char*);
+#endif
 
 #if !defined(low_latency)
 static char* outstorage(char*, bool);
@@ -235,9 +261,12 @@ static bool immediate = FALSE;
 static bool coquit = FALSE;
 static jmp_buf errbufm, errbufc;
 static int intermj = 1;
+#ifdef XSPICE
 static SendInitEvtData* sendinitevt;
 static SendEvtData* sendevt;
+#endif
 static void* euserptr;
+static wordlist *shcontrols;
 
 
 // thread IDs
@@ -277,11 +306,8 @@ get_plot_byname(char* plotname)
 /*****************************************************************/
 
 #ifdef THREADS
-#ifdef __MINGW32__
-static threadId_t tid, printtid; // , bgtid;
-#else
-static threadId_t tid, printtid; // , bgtid = (threadId_t) 0;
-#endif
+
+static threadId_t tid, printtid, tid2;
 
 static bool fl_running = FALSE;
 static bool fl_exited = TRUE;
@@ -294,6 +320,29 @@ static bool ps_exited = TRUE;
 #else
 #define EXPORT_FLAVOR
 #endif
+
+/* starts a thread to run the controls, started when bg thread finishes */
+static void * EXPORT_FLAVOR
+_cthread_run(void *controls)
+{
+    wordlist *wl;
+#ifdef HAVE_LIBPTHREAD
+    if (!cont_condition)
+        printf("Prepared to start controls after bg_run has finished\n");
+    pthread_mutex_lock(&triggerMutex);
+    while (!cont_condition)
+        pthread_cond_wait(&cond, &triggerMutex);
+    pthread_mutex_unlock(&triggerMutex);
+#endif
+    fl_exited = FALSE;
+    for (wl = controls; wl; wl = wl->wl_next)
+        cp_evloop(wl->wl_word);
+    fl_exited = TRUE;
+#ifdef HAVE_LIBPTHREAD
+    cont_condition = FALSE;
+#endif
+    return NULL;
+}
 
 /* starts a background thread, e.g. from command bg_run */
 static void * EXPORT_FLAVOR
@@ -317,6 +366,15 @@ _thread_run(void *string)
     /* notify caller that thread has exited */
     if (!nobgtrwanted)
         bgtr(fl_exited, ng_ident, userptr);
+#ifdef HAVE_LIBPTHREAD
+    cont_condition = TRUE;
+    pthread_cond_signal(&cond);
+#elif defined _MSC_VER || defined __MINGW32__
+    ResumeThread(tid2);
+#else
+
+#endif
+
     return NULL;
 }
 
@@ -347,9 +405,7 @@ _thread_stop(void)
         }
         else
             fprintf(stdout, "Background thread stopped with timeout = %d\n", timeout);
-#ifdef HAVE_LIBPTHREAD
-        pthread_join(tid, NULL);
-#endif
+
         fl_running = FALSE;
         ft_intrpt = FALSE;
         return EXIT_NORMAL;
@@ -371,6 +427,43 @@ sighandler_sharedspice(int num)
 
 #endif /*THREADS*/
 
+/* create a suspended thread tid2 that is activated when bg_run has finished.
+   It executes the .control commands. If the arguemnt is NULL, the thread is
+   started with the existing controls (e.g. during command 'reset'. */
+void
+exec_controls(wordlist *newcontrols)
+{
+    if (newcontrols) {
+        if (shcontrols)
+            wl_free(shcontrols);
+        shcontrols = newcontrols;
+    }
+#ifdef THREADS
+#ifdef HAVE_LIBPTHREAD
+    cont_condition = FALSE;
+    usleep(20000); /* wait a little */
+    pthread_create(&tid2, NULL, (void * (*)(void *))_cthread_run, (void *)shcontrols);
+    pthread_detach(tid2);  /* automatically release the memory after thread has finished */
+#elif defined _MSC_VER || defined __MINGW32__
+    tid2 = (HANDLE)_beginthreadex(NULL, 0, (unsigned int(__stdcall *)(void *))_cthread_run,
+        (void*)shcontrols, CREATE_SUSPENDED, NULL);
+#else
+    tid2 = CreateThread(NULL, 0, (PTHREAD_START_ROUTINE)_cthread_run, (void*)shcontrols,
+        0, NULL);
+#endif
+#else
+    wordlist *wl;
+    for (wl = shcontrols; wl; wl = wl->wl_next)
+        cp_evloop(wl->wl_word);
+#endif
+}
+
+/* free controls after 'quit' */
+void rem_controls(void)
+{
+    wl_free(shcontrols);
+}
+
 
 /* run a ngspice command */
 static int
@@ -386,7 +479,8 @@ runc(char* command)
     bool fl_bg = FALSE;
     command_id = threadid_self();
     /* run task in background if command is preceeded by "bg_" */
-    if (!cieq("bg_halt", command) && !cieq("bg_pstop", command) && ciprefix("bg_", command)) {
+    if (!cieq("bg_halt", command) && !cieq("bg_pstop", command)
+        && !cieq("bg_ctrl", command) && ciprefix("bg_", command)) {
         strncpy(buf, command+3, 1024);
         fl_bg = TRUE;
     }
@@ -443,6 +537,7 @@ runc(char* command)
         string = copy(buf);     /*as buf gets freed fairly quickly*/
 #ifdef HAVE_LIBPTHREAD
         pthread_create(&tid, NULL, (void * (*)(void *))_thread_run, (void *)string);
+        pthread_detach(tid);
 #elif defined _MSC_VER || defined __MINGW32__
         tid = (HANDLE)_beginthreadex(NULL, 0, (unsigned int (__stdcall *)(void *))_thread_run,
             (void*)string, 0, NULL);
@@ -455,6 +550,13 @@ runc(char* command)
         if (!strcmp(buf, "bg_halt")) {
             signal(SIGINT, oldHandler);
             return _thread_stop();
+        /* bg_ctrl prepare running the controls after bg_run */
+        } else if (!strcmp(buf, "bg_ctrl")) {
+            if (shcontrols)
+                exec_controls(wl_copy(shcontrols));
+            else
+                fprintf(stderr, "Warning: No .control commands available, bg_ctrl skipped\n");
+            return 0;
         } else
             /* cannot do anything if ngspice is running in the bg*/
             if (fl_running) {
@@ -613,6 +715,7 @@ ngSpice_Init(SendChar* printfcn, SendStat* statusfcn, ControlledExit* ngspiceexi
     pthread_mutex_init(&triggerMutex, NULL);
     pthread_mutex_init(&allocMutex, NULL);
     pthread_mutex_init(&fputsMutex, NULL);
+    cont_condition = FALSE;
 #else
 #ifdef SRW
     InitializeSRWLock(&triggerMutex);
@@ -645,8 +748,10 @@ ngSpice_Init(SendChar* printfcn, SendStat* statusfcn, ControlledExit* ngspiceexi
     /* program name*/
     cp_program = ft_sim->simulator;
 
-    srand((unsigned int) getpid());
-    TausSeed();
+    /* initialze random number generator with seed = 1 */
+    int ii = 1;
+    cp_vset("rndseed", CP_NUM, &ii);
+    com_sseed(NULL);
 
     /* set a boolean variable to be used in .control sections */
     bool sm = TRUE;
@@ -730,7 +835,7 @@ bot:
     {
         unsigned int rseed = 66;
         initnorm (0, 0);
-        if (!cp_getvar("rndseed", CP_NUM, &rseed)) {
+        if (!cp_getvar("rndseed", CP_NUM, &rseed, 0)) {
             time_t acttime = time(NULL);
             rseed = (unsigned int) acttime;
         }
@@ -738,15 +843,7 @@ bot:
         fprintf (cp_out, "SoS %f, seed value: %ld\n", renormalize(), rseed);
     }
 #elif defined (WaGauss)
-    {
-        unsigned int rseed = 66;
-        if (!cp_getvar("rndseed", CP_NUM, &rseed)) {
-            time_t acttime = time(NULL);
-            rseed = (unsigned int) acttime;
-        }
-        srand(rseed);
         initw();
-    }
 #endif
 
 //  com_version(NULL);
@@ -810,14 +907,13 @@ int  ngSpice_Command(char* comexec)
            fprintf(stderr, no_init);
            return 1;
        }
-
        runc(comexec);
        /* main thread prepares immediate detaching of dll */
        immediate = TRUE;
        return 0;
     }
     return 1;
-};
+}
 
 /* Return information about a vector to the caller */
 IMPEXP
@@ -864,7 +960,7 @@ pvector_info  ngGet_Vec_Info(char* vecname)
 #endif
 
     return myvec;
-};
+}
 
 /* Receive a circuit from the caller as a
    pointer to an array of char* .
@@ -1111,7 +1207,7 @@ sh_vfprintf(FILE *f, const char *fmt, va_list args)
     }
 
     /* add / to escape characters, if 'set addescape' is called in .spiceinit */
-    if (cp_getvar("addescape", CP_BOOL, NULL)) {
+    if (cp_getvar("addescape", CP_BOOL, NULL, 0)) {
         size_t escapes;
         const char * const escape_chars = "$[]\"\\";
         char *s = p;
@@ -1515,10 +1611,15 @@ void SetAnalyse(
    int DecaPercent /*in: 10 times the progress [%]*/
    /*HWND hwAnalyse, in: global handle to analysis window */
 ) {
+    /* If caller has sent NULL address for statfcn */
+    if (nostatuswanted)
+        return;
+
 #ifdef HAVE_FTIME
    static int OldPercent = -2;     /* Previous progress value */
    static char OldAn[128];         /* Previous analysis type */
    char* s;                        /* outputs to callback function */
+   static char olds[128];          /* previous output */
    static struct timeb timebefore; /* previous time stamp */
    struct timeb timenow;           /* actual time stamp */
    int diffsec, diffmillisec;      /* differences actual minus prev. time stamp */
@@ -1529,9 +1630,7 @@ void SetAnalyse(
    if (ft_curckt)
        ckt = ft_curckt->ci_ckt;
 
-   /* If caller has sent NULL address for statfcn */
-   if (nostatuswanted)
-       return;
+   strcpy(OldAn, "?"); /* initial value */
 
    if ((DecaPercent == OldPercent) && !strcmp(OldAn, Analyse))
        return;
@@ -1594,8 +1693,10 @@ void SetAnalyse(
             printf("%s finished after %4.2f seconds.\n", OldAn, seconds());
          strncpy(OldAn, Analyse, 127);
       }
-
-      result = statfcn(s, ng_ident, userptr);
+      /* ouput only after a change */
+      if (strcmp(olds, s))
+          result = statfcn(s, ng_ident, userptr);
+      strcpy(olds, s);
    }
    tfree(s);
 #else
@@ -1979,6 +2080,7 @@ sharedsync(double *pckttime, double *pcktdelta, double olddelta, double finalt,
     }
 }
 
+#ifdef XSPICE
 void shared_send_event(int index, double step, double dvalue, char *svalue, void *pvalue, int plen, int mode)
 {
     if(wantevtdata)
@@ -1991,4 +2093,4 @@ void shared_send_dict(int index, int no_of_nodes, char* name, char*type)
     if (sendinitevt)
         sendinitevt(index, no_of_nodes, name, type, ng_ident, euserptr);
 }
-
+#endif

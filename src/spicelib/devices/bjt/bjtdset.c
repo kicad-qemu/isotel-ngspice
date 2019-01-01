@@ -467,7 +467,6 @@ int BJTdSetup(GENmodel *inModel, CKTcircuit *ckt)
             /* ib term */
 
             EqualDeriv(&d_ib, &d_p);
-            d_ib.d1_p = 0.0;
             d_ib.value = cb;
             d_ib.d1_p = gbe/here->BJTtBetaF + gben;
             d_ib.d2_p2 = gbe2/here->BJTtBetaF + gben2;
@@ -580,8 +579,8 @@ int BJTdSetup(GENmodel *inModel, CKTcircuit *ckt)
                     czbe*xme*(xme+1)*sarg/(arg*arg*pe*pe*6);
             } else {
                 f1=here->BJTtf1;
-                f2=model->BJTf2;
-                f3=model->BJTf3;
+                f2=here->BJTtf2;
+                f3=here->BJTtf3;
                 czbef2=czbe/f2;
                 lcapbe1 = czbef2*(f3+xme*vbe/pe);
                 lcapbe2 = 0.5*xme*czbef2/pe;
@@ -594,8 +593,8 @@ int BJTdSetup(GENmodel *inModel, CKTcircuit *ckt)
 
             fcpc=here->BJTtf4;
             f1=here->BJTtf5;
-            f2=model->BJTf6;
-            f3=model->BJTf7;
+            f2=here->BJTtf6;
+            f3=here->BJTtf7;
             if (vbc < fcpc) {
                 arg=1-vbc/pc;
                 sarg=exp(-xmc*log(arg));

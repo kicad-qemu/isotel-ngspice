@@ -90,7 +90,9 @@ static bool shouldstop = FALSE; /* Tell simulator to stop next time it asks. */
 static bool interpolated = FALSE;
 static double *valueold, *valuenew;
 
+#ifdef SHARED_MODULE
 static bool savenone = FALSE;
+#endif
 
 /* The two "begin plot" routines share all their internals... */
 
@@ -154,11 +156,11 @@ beginPlot(JOB *analysisPtr, CKTcircuit *circuitPtr, char *cktName, char *analNam
         /*end saj*/
 
         /* Check to see if we want to print informational data. */
-        if (cp_getvar("printinfo", CP_BOOL, NULL))
+        if (cp_getvar("printinfo", CP_BOOL, NULL, 0))
             fprintf(cp_err, "(debug printing enabled)\n");
 
         /* Check to see if we want to save only interpolated data. */
-        if (cp_getvar("interp", CP_BOOL, NULL)) {
+        if (cp_getvar("interp", CP_BOOL, NULL, 0)) {
             interpolated = TRUE;
             fprintf(cp_out, "Warning: Interpolated raw file data!\n\n");
         }
@@ -446,7 +448,8 @@ static int
 addSpecialDesc(runDesc *run, char *name, char *devname, char *param, int depind)
 {
     dataDesc *data;
-    char *unique;       /* unique char * from back-end */
+    char *unique, *freeunique;       /* unique char * from back-end */
+    int ret;
 
     if (!run->numData)
         run->data = TMALLOC(dataDesc, 1);
@@ -459,11 +462,14 @@ addSpecialDesc(runDesc *run, char *name, char *devname, char *param, int depind)
 
     data->name = copy(name);
 
-    unique = copy(devname);
+    freeunique = unique = copy(devname);
 
-    /* MW. My "special" routine here */
-    INPinsertNofree(&unique, ft_curckt->ci_symtab);
+    /* unique will be overridden, if it already exists */
+    ret = INPinsertNofree(&unique, ft_curckt->ci_symtab);
     data->specName = unique;
+
+    if (ret == E_EXISTS)
+        tfree(freeunique);
 
     data->specParamName = copy(param);
 
@@ -1054,7 +1060,7 @@ plotInit(runDesc *run)
     }
 }
 
-
+/* prepare the vector length data for memory allocation */
 static inline int
 vlength2delta(int l)
 {
@@ -1063,18 +1069,30 @@ vlength2delta(int l)
         /* We need just a vector length of 1 */
         return 1;
 #endif
-
-    if (l < 50000)
-        return 512;
-    if (l < 200000)
-        return 256;
-    if (l < 500000)
-        return 128;
-    /* larger memory allocations may exhaust memory easily
-     * this function may use better estimation depending on
-     * available memory and number of vectors (run->numData)
-     */
-    return 64;
+    static int newpoints;
+    static int newpoints2;
+    int points = ft_curckt->ci_ckt->CKTtimeListSize;
+    /* transient and pss analysis (points > 0) upon start */
+    if (l == 0 && points > 0) {
+        /* number of timesteps plus some overhead */
+        newpoints = points + 100;
+        return newpoints;
+    }
+    /* transient and pss if original estimate is exceeded */
+    else if (l == newpoints && points > 0)
+    {
+        /* check where we are */
+        double timerel = ft_curckt->ci_ckt->CKTtime / ft_curckt->ci_ckt->CKTfinalTime;
+        /* return an estimate of the appropriate number of time points */
+        newpoints2 = (int)(points / timerel) - points + 1;
+        return newpoints2;
+    }
+    /* the estimate is (hopefully only slightly) too small, so add 2% of points */
+    else if (points > 0)
+        return (int)(newpoints2 / 50) + 1;
+    /* other analysis types that do not set CKTtimeListSize */
+    else
+        return 1024;
 }
 
 
@@ -1292,7 +1310,7 @@ OUTerror(int flags, char *format, IFuid *names)
     char buf[BSIZE_SP], *s, *bptr;
     int nindex = 0;
 
-    if ((flags == ERR_INFO) && cp_getvar("printinfo", CP_BOOL, NULL))
+    if ((flags == ERR_INFO) && cp_getvar("printinfo", CP_BOOL, NULL, 0))
         return;
 
     for (m = msgs; m->flag; m++)
@@ -1325,7 +1343,7 @@ OUTerrorf(int flags, const char *format, ...)
     struct mesg *m;
     va_list args;
 
-    if ((flags == ERR_INFO) && cp_getvar("printinfo", CP_BOOL, NULL))
+    if ((flags == ERR_INFO) && cp_getvar("printinfo", CP_BOOL, NULL, 0))
         return;
 
     for (m = msgs; m->flag; m++)

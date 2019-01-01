@@ -45,8 +45,6 @@ extern struct dbcomm *dbs;
 
 FILE *rawfileFp;
 bool rawfileBinary;
-#define RAWBUF_SIZE 32768
-char rawfileBuf[RAWBUF_SIZE];
 /*To tell resume the rawfile name saj*/
 char *last_used_rawfile = NULL;
 /*end saj */
@@ -215,7 +213,7 @@ dosim(
         ww = wl_cons(copy(what), wl);
     }
     /* reset output file type according to variable given in spinit */
-    if (cp_getvar("filetype", CP_STRING, buf)) {
+    if (cp_getvar("filetype", CP_STRING, buf, sizeof(buf))) {
         if (eq(buf, "binary"))
             ascii = FALSE;
         else if (eq(buf, "ascii"))
@@ -282,7 +280,6 @@ dosim(
 /*---------------------------------------------------------------------------*/
 #else
         else if (!(rawfileFp = fopen(wl->wl_word, "w"))) {
-            setvbuf(rawfileFp, rawfileBuf, _IOFBF, RAWBUF_SIZE);
             perror(wl->wl_word);
             ft_setflag = FALSE;
             return 1;
@@ -345,7 +342,8 @@ dosim(
     if (rawfileFp) {
         if (ftell(rawfileFp) == 0) {
             (void) fclose(rawfileFp);
-            (void) unlink(wl->wl_word);
+            if (wl)
+                (void) unlink(wl->wl_word);
         } else {
             (void) fclose(rawfileFp);
         }

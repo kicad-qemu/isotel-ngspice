@@ -34,10 +34,8 @@ Author: 1985 Wayne A. Christopher, U. C. Berkeley CAD Group
 
 /* We might compile for Windows, but only as a console application (e.g. tcl) */
 #if defined(HAS_WINGUI) || defined(__MINGW32__) || defined(_MSC_VER)
+#define PSAPI_VERSION 1
 #define HAVE_WIN32
-#endif
-
-#ifdef HAVE_WIN32
 
 #define WIN32_LEAN_AND_MEAN
 
@@ -52,12 +50,13 @@ Author: 1985 Wayne A. Christopher, U. C. Berkeley CAD Group
 #include <windows.h>
 #include <psapi.h>
 
+#else
+#include <unistd.h>
 #endif /* HAVE_WIN32 */
 
 /* Uncheck the following definition if you want to get the old usage information
    #undef HAVE__PROC_MEMINFO
 */
-
 
 static void printres(char *name);
 static void fprintmem(FILE *stream, unsigned long long memory);
@@ -124,7 +123,8 @@ com_rusage(wordlist *wl)
                 (void) putc('\n', cp_out);
         }
     } else {
-        printres("cputime");
+        printf("\n");
+        printres("time");
         (void) putc('\n', cp_out);
         printres("totalcputime");
         (void) putc('\n', cp_out);
@@ -181,7 +181,6 @@ ft_ckspace(void)
 
 
 /* Print out one piece of resource usage information. */
-
 static void
 printres(char *name)
 {
@@ -189,6 +188,7 @@ printres(char *name)
     char *paramname = NULL;
 #endif
     bool yy = FALSE;
+    static bool called = FALSE;
     static long last_sec = 0, last_msec = 0;
     struct variable *v, *vfree = NULL;
     char *cpu_elapsed;
@@ -237,7 +237,7 @@ printres(char *name)
         }
 
         if (!name || eq(name, "totalcputime")) {
-            fprintf(cp_out, "Total %s time: %u.%03u seconds.\n",
+            fprintf(cp_out, "Total %s time (seconds) = %u.%03u \n",
                     cpu_elapsed, total_sec, total_msec);
         }
 
@@ -248,12 +248,14 @@ printres(char *name)
                 last_msec -= 1000;
                 last_sec += 1;
             }
-#ifndef HAVE_WIN32
-            fprintf(cp_out, "%s time since last call: %lu.%03lu seconds.\n",
-                    cpu_elapsed, last_sec, last_msec);
-#endif
+            /* do not print it the first time, doubling totalcputime */
+            if (called)
+                fprintf(cp_out, "%s time since last call seconds) = %lu.%03lu \n",
+                        cpu_elapsed, last_sec, last_msec);
+
             last_sec = total_sec;
             last_msec = total_msec;
+            called = TRUE;
         }
 
 #ifdef XSPICE
@@ -313,31 +315,31 @@ printres(char *name)
 
         /* get_procm returns Kilobytes */
         fprintf(cp_out, "Total ngspice program size = ");
-        fprintmem(cp_out, mem_ng_act.size*1024);
+        fprintmem(cp_out, mem_ng_act.size);
         fprintf(cp_out, ".\n");
 #if defined(HAVE__PROC_MEMINFO)
         fprintf(cp_out, "Resident set size = ");
-        fprintmem(cp_out, mem_ng_act.resident*1024);
+        fprintmem(cp_out, mem_ng_act.resident);
         fprintf(cp_out, ".\n");
 
         fprintf(cp_out, "Shared ngspice pages = ");
-        fprintmem(cp_out, mem_ng_act.shared*1024);
+        fprintmem(cp_out, mem_ng_act.shared);
         fprintf(cp_out, ".\n");
 
         fprintf(cp_out, "Text (code) pages = ");
-        fprintmem(cp_out, mem_ng_act.trs*1024);
+        fprintmem(cp_out, mem_ng_act.trs);
         fprintf(cp_out, ".\n");
 
         fprintf(cp_out, "Stack = ");
-        fprintmem(cp_out, mem_ng_act.drs*1024);
+        fprintmem(cp_out, mem_ng_act.drs);
         fprintf(cp_out, ".\n");
 
         fprintf(cp_out, "Library pages = ");
-        fprintmem(cp_out, mem_ng_act.lrs*1024);
+        fprintmem(cp_out, mem_ng_act.lrs);
         fprintf(cp_out, ".\n");
         /* not used
            fprintf(cp_out, "Dirty pages = ");
-           fprintmem(cp_out, all_memory.dt * 1024);
+           fprintmem(cp_out, all_memory.dt);
            fprintf(cp_out, ".\n"); */
 #endif  /* HAVE__PROC_MEMINFO */
 #else   /* HAS_WINGUI or HAVE__PROC_MEMINFO */
@@ -419,7 +421,9 @@ printres(char *name)
         if (name && v) {
 #endif
             fprintf(cp_out, "%s = ", v->va_name);
-            wl_print(cp_varwl(v), cp_out);
+            wordlist *wltmp = cp_varwl(v);
+            wl_print(wltmp, cp_out);
+            wl_free(wltmp);
             (void) putc('\n', cp_out);
             yy = TRUE;
         } else if (v) {
@@ -460,7 +464,7 @@ printres(char *name)
 static void
 fprintmem(FILE *stream, unsigned long long memory) {
     if (memory > 1048576)
-        fprintf(stream, "%8.6f MB", (double)memory / 1048576.);
+        fprintf(stream, "%8.3f MB", (double)memory / 1048576.);
     else if (memory > 1024)
         fprintf(stream, "%5.3f kB", (double)memory / 1024.);
     else
@@ -472,47 +476,41 @@ fprintmem(FILE *stream, unsigned long long memory) {
 
 static int get_procm(struct proc_mem *memall) {
 
-#if defined(_MSC_VER) || defined(__MINGW32__)
-#if (_WIN32_WINNT >= 0x0500) && defined(HAS_WINGUI)
+#ifdef HAVE_WIN32
+    /* FIXME: shared module should be allowed, but currently does not link to psapi within MINGW/MSYS2 */
+#if !defined(SHARED_MODULE) || !defined(__MINGW32__)
 /* Use Windows API function to obtain size of memory - more accurate */
-    HANDLE hProcess;
     PROCESS_MEMORY_COUNTERS pmc;
-    DWORD procid = GetCurrentProcessId();
-
-    hProcess = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ,
-                           FALSE, procid);
-    if (NULL == hProcess)
-        return 0;
 
     /* psapi library required */
-    if (GetProcessMemoryInfo(hProcess, &pmc, sizeof(pmc))) {
-        memall->size = pmc.WorkingSetSize/1024;
-        memall->resident = pmc.QuotaNonPagedPoolUsage/1024;
-        memall->trs = pmc.QuotaPagedPoolUsage/1024;
-    } else {
-        CloseHandle(hProcess);
+    if (GetProcessMemoryInfo(GetCurrentProcess(), &pmc, sizeof(pmc))) {
+        memall->size = pmc.WorkingSetSize;
+        memall->resident = pmc.QuotaNonPagedPoolUsage;
+        memall->trs = pmc.QuotaPagedPoolUsage;
+    } else
         return 0;
-    }
-    CloseHandle(hProcess);
 #else
 /* Use Windows GlobalMemoryStatus or /proc/memory to obtain size of memory - not accurate */
     get_sysmem(&mem_t_act); /* size is the difference between free memory at start time and now */
     if (mem_t.free > mem_t_act.free) /* it can happen that that ngspice is */
-        memall->size = (mem_t.free - mem_t_act.free)/1024; /* to small compared to os memory usage */
+        memall->size = (mem_t.free - mem_t_act.free); /* to small compared to os memory usage */
     else
         memall->size = 0;       /* sure, it is more */
     memall->resident = 0;
     memall->trs = 0;
-#endif /* _WIN32_WINNT 0x0500 && HAS_WINGUI */
+#endif
 #else
 /* Use Linux/UNIX /proc/<pid>/statm file information */
     FILE *fp;
-    char buffer[1024], fibuf[100];
+    char buffer[1024];
     size_t bytes_read;
-
-    (void) sprintf(fibuf, "/proc/%d/statm", getpid());
-
-    if ((fp = fopen(fibuf, "r")) == NULL) {
+    long sz;
+    /* page size */
+    if ((sz = sysconf(_SC_PAGESIZE)) == -1) {
+        perror("sysconf() error");
+        return 0;
+    }
+    if ((fp = fopen("/proc/self/statm", "r")) == NULL) {
         perror("fopen(\"/proc/%d/statm\")");
         return 0;
     }
@@ -523,7 +521,16 @@ static int get_procm(struct proc_mem *memall) {
     buffer[bytes_read] = '\0';
 
     sscanf(buffer, "%llu %llu %llu %llu %llu %llu %llu", &memall->size, &memall->resident, &memall->shared, &memall->trs, &memall->drs, &memall->lrs, &memall->dt);
-#endif
+    /* scale by page size */
+    memall->size *= (long long unsigned)sz;
+    memall->resident *= (long long unsigned)sz;
+    memall->shared *= (long long unsigned)sz;
+    memall->trs *= (long long unsigned)sz;
+    memall->drs *= (long long unsigned)sz;
+    memall->lrs *= (long long unsigned)sz;
+    memall->dt *= (long long unsigned)sz;
+
+#endif /* HAVE_WIN32 */
     return 1;
 }
 
@@ -627,7 +634,7 @@ fault(void)
 static void *
 baseaddr(void)
 {
-#if defined(__CYGWIN__) || defined(__MINGW32__) || defined(HAVE_WIN32) || defined(__APPLE__)
+#if defined(__CYGWIN__) || defined(__MINGW32__) || defined(HAVE_WIN32) || defined(__APPLE__) || defined(__SUNPRO_C)
     return 0;
 #else
     char *low, *high, *at;

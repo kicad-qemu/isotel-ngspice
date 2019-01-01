@@ -76,9 +76,9 @@ com_fft(wordlist *wl)
 
     win = TMALLOC(double, length);
     maxt = time[length-1];
-    if (!cp_getvar("specwindow", CP_STRING, window))
+    if (!cp_getvar("specwindow", CP_STRING, window, sizeof(window)))
         strcpy(window, "hanning");
-    if (!cp_getvar("specwindoworder", CP_NUM, &order))
+    if (!cp_getvar("specwindoworder", CP_NUM, &order, 0))
         order = 2;
     if (order < 2)
         order = 2;
@@ -160,15 +160,21 @@ com_fft(wordlist *wl)
     printf("FFT: Time span: %g s, input length: %d\n", span, length);
     printf("FFT: Frequency resolution: %g Hz, output length: %d\n", 1.0/span, fpts);
 
+    in = fftw_malloc(sizeof(double) * (unsigned int) length);
+    out = fftw_malloc(sizeof(fftw_complex) * (unsigned int) fpts);
+
+    for (j = 0; j < length; j++)
+        in[j] = tdvec[0][j]*win[j];
+
+    /* data have same type and length - so we need only one plan */
+    plan_forward = fftw_plan_dft_r2c_1d(length, in, out, FFTW_ESTIMATE); 
+
     for (i = 0; i<ngood; i++) {
 
-        in = fftw_malloc(sizeof(double) * (unsigned int) length);
-        out = fftw_malloc(sizeof(fftw_complex) * (unsigned int) fpts);
-
-        for (j = 0; j < length; j++)
-            in[j] = tdvec[i][j]*win[j];
-
-        plan_forward = fftw_plan_dft_r2c_1d(length, in, out, FFTW_ESTIMATE);
+        if (i > 0) {
+            for (j = 0; j < length; j++)
+                in[j] = tdvec[i][j]*win[j];
+        }
 
         fftw_execute(plan_forward);
 
@@ -178,8 +184,12 @@ com_fft(wordlist *wl)
             fdvec[i][j].cx_imag = out[j][1]/scale;
         }
 
-        fftw_free(in);
-        fftw_free(out);
+    }
+
+    fftw_destroy_plan(plan_forward);
+
+    fftw_free(in);
+    fftw_free(out);
 
 #else /* Green's FFT */
 
@@ -213,14 +223,11 @@ com_fft(wordlist *wl)
 
         tfree(in);
 
-#endif
-
     }
 
-done:
-#ifdef HAVE_LIBFFTW3
-    fftw_destroy_plan(plan_forward);
 #endif
+
+done:
     tfree(tdvec);
     tfree(fdvec);
     tfree(win);
@@ -296,9 +303,9 @@ com_psd(wordlist *wl)
 
     win = TMALLOC(double, length);
     maxt = time[length-1];
-    if (!cp_getvar("specwindow", CP_STRING, window))
+    if (!cp_getvar("specwindow", CP_STRING, window, sizeof(window)))
         strcpy(window, "hanning");
-    if (!cp_getvar("specwindoworder", CP_NUM, &order))
+    if (!cp_getvar("specwindoworder", CP_NUM, &order, 0))
         order = 2;
     if (order < 2)
         order = 2;
@@ -385,12 +392,18 @@ com_psd(wordlist *wl)
     in = fftw_malloc(sizeof(double) * (unsigned int) length);
     out = fftw_malloc(sizeof(fftw_complex) * (unsigned int) fpts);
 
+    for (j = 0; j < length; j++)
+        in[j] = tdvec[0][j]*win[j];
+
+    /* data have same type and length - so we need only one plan */
+    plan_forward = fftw_plan_dft_r2c_1d(length, in, out, FFTW_ESTIMATE);
+
     for (i = 0; i<ngood; i++) {
 
-        for (j = 0; j < length; j++)
-            in[j] = tdvec[i][j]*win[j];
-
-        plan_forward = fftw_plan_dft_r2c_1d(length, in, out, FFTW_ESTIMATE);
+        if (i > 0) {
+            for (j = 0; j < length; j++)
+                in[j] = tdvec[i][j]*win[j];
+        }
 
         fftw_execute(plan_forward);
 
@@ -479,17 +492,17 @@ com_psd(wordlist *wl)
             fdvec[i][j].cx_real = reald[j] * (double)fpts / freq[fpts - 1];
     }
 
-done:
 #ifdef HAVE_LIBFFTW3
+    fftw_destroy_plan(plan_forward);
     fftw_free(in);
     fftw_free(out);
-    fftw_destroy_plan(plan_forward);
 #endif
+done:
     tfree(tdvec);
     tfree(fdvec);
     tfree(win);
 
-    free(reald);
+    tfree(reald);
 
     free_pnode(names);
 }

@@ -581,8 +581,8 @@ d_tan(double *dd, int length)
 
     d = alloc_d(length);
     for (i = 0; i < length; i++) {
-        rcheck(cos(degtorad(dd[i])) != 0, "tan");
-        d[i] = sin(degtorad(dd[i])) / cos(degtorad(dd[i]));
+        rcheck(tan(degtorad(dd[i])) != 0, "tan");
+        d[i] = tan(degtorad(dd[i]));
     }
     return d;
 }
@@ -595,8 +595,7 @@ d_tanh(double *dd, int length)
 
     d = alloc_d(length);
     for (i = 0; i < length; i++) {
-        rcheck(cosh(degtorad(dd[i])) != 0, "tanh");
-        d[i] = sinh(degtorad(dd[i])) / cosh(degtorad(dd[i]));
+        d[i] = tanh(degtorad(dd[i]));
     }
     return d;
 }
@@ -731,7 +730,7 @@ cx_sortorder(void *data, short int type, int length, int *newlength, short int *
     int i;
 
     amplitude_index_t *array_amplitudes;
-    array_amplitudes = (amplitude_index_t *) malloc(sizeof(amplitude_index_t) * (size_t) length);
+    array_amplitudes = (amplitude_index_t *) tmalloc(sizeof(amplitude_index_t) * (size_t) length);
 
     *newlength = length;
     *newtype = VF_REAL;
@@ -748,7 +747,7 @@ cx_sortorder(void *data, short int type, int length, int *newlength, short int *
             d[i] = array_amplitudes[i].index;
     }
 
-    free(array_amplitudes);
+    tfree(array_amplitudes);
 
     /* Otherwise it is 0, but tmalloc zeros the stuff already. */
     return ((void *) d);

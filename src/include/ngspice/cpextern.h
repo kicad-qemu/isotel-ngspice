@@ -169,7 +169,7 @@ extern char *span_var_expr(char *t);
 
 /* var2.c */
 extern void cp_vprint(void);
-extern bool cp_getvar(char *name, enum cp_types type, void *retval);
+extern bool cp_getvar(char *name, enum cp_types type, void *retval, size_t rsize);
 
 /* cpinterface.c etc -- stuff CP needs from FTE */
 
@@ -180,7 +180,7 @@ extern void cp_periodic(void);
 extern void ft_cpinit(void);
 extern struct comm *cp_coms;
 extern char *cp_program;
-extern struct variable *cp_enqvar(char *word);
+extern struct variable *cp_enqvar(char *word, int *tbfreed);
 extern struct variable *cp_usrvars(void);
 int cp_usrset(struct variable *var, bool isset);
 extern void fatal(void);

@@ -339,7 +339,6 @@ BSIM4v5instance **InstArray;
         if (!model->BSIM4v5prwbGiven)
             model->BSIM4v5prwb = 0.0;      
         if (!model->BSIM4v5prtGiven)
-        if (!model->BSIM4v5prtGiven)
             model->BSIM4v5prt = 0.0;      
         if (!model->BSIM4v5eta0Given)
             model->BSIM4v5eta0 = 0.08;      /* no unit  */ 
@@ -2138,6 +2137,11 @@ BSIM4v5unsetup(
 #ifndef HAS_BATCHSIM
     BSIM4v5model *model;
     BSIM4v5instance *here;
+
+#ifdef USE_OMP
+    model = (BSIM4v5model*)inModel;
+    tfree(model->BSIM4v5InstanceArray);
+#endif
 
     for (model = (BSIM4v5model *)inModel; model != NULL;
             model = BSIM4v5nextModel(model))

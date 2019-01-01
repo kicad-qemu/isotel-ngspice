@@ -390,7 +390,6 @@ BSIM4v6instance **InstArray;
         if (!model->BSIM4v6prwbGiven)
             model->BSIM4v6prwb = 0.0;      
         if (!model->BSIM4v6prtGiven)
-        if (!model->BSIM4v6prtGiven)
             model->BSIM4v6prt = 0.0;      
         if (!model->BSIM4v6eta0Given)
             model->BSIM4v6eta0 = 0.08;      /* no unit  */ 
@@ -2471,6 +2470,11 @@ BSIM4v6unsetup(GENmodel *inModel, CKTcircuit *ckt)
 #ifndef HAS_BATCHSIM
     BSIM4v6model *model;
     BSIM4v6instance *here;
+
+#ifdef USE_OMP
+    model = (BSIM4v6model*)inModel;
+    tfree(model->BSIM4v6InstanceArray);
+#endif
 
     for (model = (BSIM4v6model *)inModel; model != NULL;
             model = BSIM4v6nextModel(model))

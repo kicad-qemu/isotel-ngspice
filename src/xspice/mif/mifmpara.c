@@ -109,6 +109,8 @@ int MIFmParam(
 
     /* initialize the parameter is_null and size elements and allocate elements */
     model->param[param_index]->is_null = MIF_FALSE;
+    /* element may exist already, if called from 'altermod' */
+    FREE(model->param[param_index]->element);
     if(is_array) {
         model->param[param_index]->size = value->v.numValue;
         model->param[param_index]->element = TMALLOC(Mif_Value_t, value->v.numValue);
@@ -129,14 +131,17 @@ int MIFmParam(
 
         case  IF_FLAG:
             model->param[param_index]->element[0].bvalue = value->iValue;
+            model->param[param_index]->eltype = IF_FLAG;
             break;
 
         case  IF_INTEGER:
             model->param[param_index]->element[0].ivalue = value->iValue;
+            model->param[param_index]->eltype = IF_INTEGER;
             break;
 
         case  IF_REAL:
             model->param[param_index]->element[0].rvalue = value->rValue;
+            model->param[param_index]->eltype = IF_REAL;
             break;
 
         case  IF_STRING:
@@ -144,6 +149,7 @@ int MIFmParam(
             model->param[param_index]->element[0].svalue =
                                        TMALLOC(char, 1 + strlen(value->sValue));
             strcpy(model->param[param_index]->element[0].svalue, value->sValue);
+            model->param[param_index]->eltype = IF_STRING;
             break;
 
         case  IF_COMPLEX:
@@ -151,6 +157,7 @@ int MIFmParam(
             /* so copy the real and imaginary parts explicitly                */
             model->param[param_index]->element[0].cvalue.real = value->cValue.real;
             model->param[param_index]->element[0].cvalue.imag = value->cValue.imag;
+            model->param[param_index]->eltype = IF_COMPLEX;
             break;
 
         default:
@@ -166,14 +173,17 @@ int MIFmParam(
 
             case  IF_FLAGVEC:
                 model->param[param_index]->element[i].bvalue = value->v.vec.iVec[i];
+                model->param[param_index]->eltype = IF_FLAGVEC;
                 break;
 
             case  IF_INTVEC:
                 model->param[param_index]->element[i].ivalue = value->v.vec.iVec[i];
+                model->param[param_index]->eltype = IF_INTVEC;
                 break;
 
             case  IF_REALVEC:
                 model->param[param_index]->element[i].rvalue = value->v.vec.rVec[i];
+                model->param[param_index]->eltype = IF_REALVEC;
                 break;
 
             case  IF_STRINGVEC:
@@ -181,6 +191,7 @@ int MIFmParam(
                 model->param[param_index]->element[i].svalue =
                                            TMALLOC(char, 1 + strlen(value->v.vec.sVec[i]));
                 strcpy(model->param[param_index]->element[i].svalue, value->v.vec.sVec[i]);
+                model->param[param_index]->eltype = IF_STRINGVEC;
                 break;
 
             case  IF_CPLXVEC:
@@ -188,6 +199,7 @@ int MIFmParam(
                 /* so copy the real and imaginary parts explicitly                */
                 model->param[param_index]->element[i].cvalue.real = value->v.vec.cVec[i].real;
                 model->param[param_index]->element[i].cvalue.imag = value->v.vec.cVec[i].imag;
+                model->param[param_index]->eltype = IF_CPLXVEC;
                 break;
 
             default:

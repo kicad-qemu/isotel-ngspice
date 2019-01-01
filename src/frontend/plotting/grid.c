@@ -130,7 +130,7 @@ gr_redrawgrid(GRAPH *graph)
     if (graph->grid.xlabel) {
         DevDrawText(graph->grid.xlabel,
                     (int) (graph->absolute.width * 0.35),
-                    graph->fontheight);
+                    graph->fontheight, 0);
     }
     if (graph->grid.ylabel) {
         if (graph->grid.gridtype == GRID_POLAR ||
@@ -139,13 +139,25 @@ gr_redrawgrid(GRAPH *graph)
         {
             DevDrawText(graph->grid.ylabel,
                         graph->fontwidth,
-                        (graph->absolute.height * 3) / 4);
+                        (graph->absolute.height * 3) / 4, 0);
         } else {
-            DevDrawText(graph->grid.ylabel,
+            if (eq(dispdev->name, "postscript") || eq(dispdev->name, "Windows"))
+                DevDrawText(graph->grid.ylabel,
                         graph->fontwidth,
-                        graph->absolute.height / 2);
+                        /*vertical text, midpoint in y is aligned midpoint of text string */
+                        (graph->absolute.height - (int) strlen(graph->grid.ylabel) * graph->fontwidth) / 2, 90);
+            else /* FIXME: for now excluding X11 and others */
+                DevDrawText(graph->grid.ylabel,
+                        graph->fontwidth,
+                        graph->absolute.height / 2, 90);
         }
     }
+
+    /* draw postscript title */
+    if (graph->plotname && eq(dispdev->name, "postscript"))
+            DevDrawText(graph->plotname,
+                        graph->fontwidth,
+                        graph->absolute.height - graph->fontheight, 0);
 
     switch (graph->grid.gridtype) {
     case GRID_POLAR:
@@ -305,8 +317,14 @@ lingrid(GRAPH *graph, double lo, double hi, double delta, int type, Axis axis)
         margin = graph->viewportxoff;
         /*max = graph->viewport.width + graph->viewportxoff;*/
         max = graph->absolute.width - graph->viewportxoff;
+        /* don't subtract font height from right border of grid */
+        if (graph->grid.ylabel)
+            max += graph->fontheight;
     } else {
         graph->viewportxoff = (digits + 5 + mag - mag3) * graph->fontwidth;
+        /* add height of the vertical text to offset*/
+        if (graph->grid.ylabel)
+            graph->viewportxoff += graph->fontheight;
         margin = graph->viewportyoff;
         /*max = graph->viewport.height + graph->viewportyoff;*/
         max = graph->absolute.height - graph->viewportyoff;
@@ -532,12 +550,12 @@ drawlingrid(GRAPH *graph, char *units, int spacing, int nsp, double dst, double 
         if (axis == x_axis)
             DevDrawText(buf, graph->viewportxoff + i -
                         ((int) strlen(buf) * graph->fontwidth) / 2,
-                        (int) (graph->fontheight * 2.5));
+                        (int) (graph->fontheight * 2.5), 0);
         else
             DevDrawText(buf, graph->viewportxoff -
                         graph->fontwidth * (int) strlen(buf),
                         graph->viewportyoff + i -
-                        graph->fontheight / 2);
+                        graph->fontheight / 2, 0);
 
         /* This is to make sure things work when delta > hi - lo. */
         if (nsp == 1)
@@ -545,10 +563,10 @@ drawlingrid(GRAPH *graph, char *units, int spacing, int nsp, double dst, double 
     }
     if (axis == x_axis)
         DevDrawText(units, (int) (graph->absolute.width * 0.6),
-                    graph->fontheight);
+                    graph->fontheight, 0);
     else
         DevDrawText(units, graph->fontwidth,
-                    (int) (graph->absolute.height - 2 * graph->fontheight));
+                    (int) (graph->absolute.height - 2 * graph->fontheight), 0);
     DevUpdate();
 }
 
@@ -705,12 +723,12 @@ drawloggrid(GRAPH *graph, char *units, int hmt, int lmt, int decsp, int subs, in
         if (axis == x_axis)
             DevDrawText(buf, graph->viewportxoff + i -
                         ((int) strlen(buf) * graph->fontwidth) / 2,
-                        (int) (graph->fontheight * 2.5));
+                        (int) (graph->fontheight * 2.5), 0);
         else
             DevDrawText(buf, graph->viewportxoff - graph->fontwidth *
                         (int) (strlen(buf) + 1),
                         graph->viewportyoff + i -
-                        graph->fontheight / 2);
+                        graph->fontheight / 2, 0);
 
         if (j >= hmt)
             break;
@@ -742,10 +760,10 @@ drawloggrid(GRAPH *graph, char *units, int hmt, int lmt, int decsp, int subs, in
 
     if (axis == x_axis)
         DevDrawText(units, (int) (graph->absolute.width * 0.6),
-                    graph->fontheight);
+                    graph->fontheight, 0);
     else
         DevDrawText(units, graph->fontwidth,
-                    (int) (graph->absolute.height - 2 * graph->fontheight));
+                    (int) (graph->absolute.height - 2 * graph->fontheight), 0);
 
     DevUpdate();
 }
@@ -969,7 +987,7 @@ drawpolargrid(GRAPH *graph)
     DevDrawText(buf, graph->grid.xaxis.circular.center
                 + graph->grid.xaxis.circular.radius,
                 graph->grid.yaxis.circular.center
-                - graph->grid.xaxis.circular.radius);
+                - graph->grid.xaxis.circular.radius, 0);
     DevUpdate();
 }
 
@@ -1001,9 +1019,9 @@ adddeglabel(GRAPH *graph, int deg, int x, int y, int cx, int cy, int lx, int ly)
     x = (int)(x + d * cos(angle) - w / 2);
     y = (int)(y + d * sin(angle) - h / 2);
 
-    DevDrawText(buf, x, y);
+    DevDrawText(buf, x, y, 0);
     DevDrawText("o", x + (int) strlen(buf) * graph->fontwidth,
-                y + graph->fontheight / 2);
+                y + graph->fontheight / 2, 0);
 }
 
 
@@ -1025,7 +1043,7 @@ addradlabel(GRAPH *graph, int lab, double theta, int x, int y)
     } else {
         x -= graph->fontwidth * (int) strlen(buf) + 3;
     }
-    DevDrawText(buf, x, y);
+    DevDrawText(buf, x, y, 0);
 }
 
 
@@ -1297,16 +1315,16 @@ drawsmithgrid(GRAPH *graph)
         DevDrawLine(gr_xcenter - zheight, gr_ycenter + yoff,
                     gr_xcenter + zheight, gr_ycenter + yoff);
         DevDrawText("0", gr_xcenter + zheight + gi_fntwidth, gr_ycenter + yoff -
-                    gi_fntheight / 2);
-        DevDrawText("o", gr_xcenter + zheight + gi_fntwidth * 2, gr_ycenter + yoff);
+                    gi_fntheight / 2, 0);
+        DevDrawText("o", gr_xcenter + zheight + gi_fntwidth * 2, gr_ycenter + yoff, 0);
         DevDrawText("180", gr_xcenter - zheight - gi_fntwidth * 5, gr_ycenter
-                    + yoff - gi_fntheight / 2);
-        DevDrawText("o", gr_xcenter - zheight - gi_fntwidth * 2, gr_ycenter + yoff);
+                    + yoff - gi_fntheight / 2, 0);
+        DevDrawText("o", gr_xcenter - zheight - gi_fntwidth * 2, gr_ycenter + yoff, 0);
     }
 
     /* (void) sprintf(buf, "e%d", basemag); */
     (void) sprintf(buf, "e%d", 0);
-    DevDrawText(buf, gr_xcenter + gr_radius, gr_ycenter - gr_radius);
+    DevDrawText(buf, gr_xcenter + gr_radius, gr_ycenter - gr_radius, 0);
 
     DevUpdate();
 }
@@ -1389,15 +1407,15 @@ arcset(GRAPH *graph, double rad, double prevrad, double irad, double iprevrad, d
         gi_fntwidth * (int) strlen(plab) - 2;
     if ((x > pxmin) && (x < pxmax)) {
         if ((yoffset > - gr_radius) && (yoffset < gr_radius))
-            DevDrawText(plab, x, centy + yoffset - gi_fntheight - 1);
+            DevDrawText(plab, x, centy + yoffset - gi_fntheight - 1, 0);
         else
-            DevDrawText(plab, x, gr_ymargin - 3 * gi_fntheight - 2);
+            DevDrawText(plab, x, gr_ymargin - 3 * gi_fntheight - 2, 0);
     }
     /*
      * x = centx + xoffset + (int) radoff + 2 * (int)rad -
      *     gi_fntwidth * strlen(nlab) - 2;
      * if ((x > gr_xmargin) && (x < gi_maxx))
-     *     DevDrawText(nlab, x, centy + yoffset - gi_fntheight - 1);
+     *     DevDrawText(nlab, x, centy + yoffset - gi_fntheight - 1, 0);
      */
 }
 

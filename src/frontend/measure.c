@@ -225,7 +225,7 @@ do_measure(
         SetAnalyse("meas", 0);
 #endif
 
-    an_name = strdup(what); /* analysis type, e.g. "tran" */
+    an_name = copy(what); /* analysis type, e.g. "tran" */
     strtolower(an_name);
     measure_word_list = NULL;
     measures_passed = TRUE;
@@ -239,7 +239,7 @@ do_measure(
     }
 
     /* don't allow autostop if no .meas commands are given in the input file */
-    if ((cp_getvar("autostop", CP_BOOL, NULL)) && (ft_curckt->ci_meas == NULL)) {
+    if ((cp_getvar("autostop", CP_BOOL, NULL, 0)) && (ft_curckt->ci_meas == NULL)) {
         fprintf(cp_err, "\nWarning: No .meas commands found!\n");
         fprintf(cp_err, "  Option autostop is not available, ignored!\n\n");
         cp_remvar("autostop");
@@ -291,8 +291,12 @@ do_measure(
         }
 
         /* skip param|expr measurement types for now -- will be done after other measurements */
-        if (strncmp(meastype, "param", 5) == 0 || strncmp(meastype, "expr", 4) == 0)
+        if (strncmp(meastype, "param", 5) == 0 || strncmp(meastype, "expr", 4) == 0) {
+            txfree(an_type);
+            txfree(resname);
+            txfree(meastype);
             continue;
+        }
 
         /* skip .meas line, if analysis type from line and name of analysis performed differ */
         if (strcmp(an_name, an_type) != 0) {
@@ -333,7 +337,7 @@ do_measure(
 
         if (!chk_only) {
             newcard          = TMALLOC(struct card, 1);
-            newcard->line = strdup(out_line);
+            newcard->line = copy(out_line);
             newcard->nextcard = NULL;
 
             if (meas_results == NULL) {
@@ -447,7 +451,7 @@ check_autostop(char* what)
 {
     bool flag = FALSE;
 
-    if (cp_getvar("autostop", CP_BOOL, NULL))
+    if (cp_getvar("autostop", CP_BOOL, NULL, 0))
         flag = do_measure(what, TRUE);
 
     return flag;

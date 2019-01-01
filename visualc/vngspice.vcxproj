@@ -318,7 +318,7 @@
       <HeapReserveSize>0</HeapReserveSize>
       <HeapCommitSize>0</HeapCommitSize>
       <StackReserveSize>4194304</StackReserveSize>
-      <StackCommitSize>16384</StackCommitSize>
+      <StackCommitSize>1048576</StackCommitSize>
       <RandomizedBaseAddress>false</RandomizedBaseAddress>
       <DataExecutionPrevention>
       </DataExecutionPrevention>
@@ -365,8 +365,8 @@
       <SubSystem>Windows</SubSystem>
       <HeapReserveSize>0</HeapReserveSize>
       <HeapCommitSize>0</HeapCommitSize>
-      <StackReserveSize>0</StackReserveSize>
-      <StackCommitSize>0</StackCommitSize>
+      <StackReserveSize>4194304</StackReserveSize>
+      <StackCommitSize>1048576</StackCommitSize>
       <OptimizeReferences>
       </OptimizeReferences>
       <EnableCOMDATFolding>
@@ -501,8 +501,8 @@
       <SubSystem>Console</SubSystem>
       <HeapReserveSize>0</HeapReserveSize>
       <HeapCommitSize>0</HeapCommitSize>
-      <StackReserveSize>0</StackReserveSize>
-      <StackCommitSize>0</StackCommitSize>
+      <StackReserveSize>4194304</StackReserveSize>
+      <StackCommitSize>1048576</StackCommitSize>
       <RandomizedBaseAddress>false</RandomizedBaseAddress>
       <DataExecutionPrevention>
       </DataExecutionPrevention>
@@ -549,8 +549,8 @@
       <SubSystem>Console</SubSystem>
       <HeapReserveSize>0</HeapReserveSize>
       <HeapCommitSize>0</HeapCommitSize>
-      <StackReserveSize>0</StackReserveSize>
-      <StackCommitSize>0</StackCommitSize>
+      <StackReserveSize>4194304</StackReserveSize>
+      <StackCommitSize>1048576</StackCommitSize>
       <OptimizeReferences>true</OptimizeReferences>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <LinkTimeCodeGeneration>UseLinkTimeCodeGeneration</LinkTimeCodeGeneration>
@@ -649,7 +649,7 @@
       <HeapReserveSize>0</HeapReserveSize>
       <HeapCommitSize>0</HeapCommitSize>
       <StackReserveSize>4194304</StackReserveSize>
-      <StackCommitSize>16394</StackCommitSize>
+      <StackCommitSize>1048576</StackCommitSize>
       <OptimizeReferences>
       </OptimizeReferences>
       <EnableCOMDATFolding>
@@ -750,7 +750,7 @@
       <HeapReserveSize>0</HeapReserveSize>
       <HeapCommitSize>0</HeapCommitSize>
       <StackReserveSize>4194304</StackReserveSize>
-      <StackCommitSize>16384</StackCommitSize>
+      <StackCommitSize>1048576</StackCommitSize>
       <OptimizeReferences>true</OptimizeReferences>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <LinkTimeCodeGeneration>UseLinkTimeCodeGeneration</LinkTimeCodeGeneration>
@@ -916,6 +916,7 @@
     <ClInclude Include="..\src\include\ngspice\enh.h" />
     <ClInclude Include="..\src\include\ngspice\enhtypes.h" />
     <ClInclude Include="..\src\include\ngspice\evt.h" />
+    <ClInclude Include="..\src\include\ngspice\evtshared.h" />
     <ClInclude Include="..\src\include\ngspice\evttypes.h" />
     <ClInclude Include="..\src\include\ngspice\evtproto.h" />
     <ClInclude Include="..\src\include\ngspice\evtudn.h" />
@@ -1280,6 +1281,7 @@
     <ClInclude Include=".\src\include\stdint.h" />
     <ClInclude Include=".\tmp-bison\inpptree-parser.h" />
     <ClInclude Include=".\tmp-bison\parse-bison.h" />
+    <ClInclude Include="resource.h" />
   </ItemGroup>
   <ItemGroup>
     <CustomBuild Include="..\src\frontend\parse-bison.y;..\src\spicelib\parser\inpptree-parser.y">
@@ -2628,6 +2630,9 @@
     <ClCompile Include=".\tmp-bison\inpptree-parser.c" />
     <ClCompile Include=".\src\msvc-compat.c" />
     <ClCompile Include=".\tmp-bison\parse-bison.c" />
+  </ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="vngspice.rc" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

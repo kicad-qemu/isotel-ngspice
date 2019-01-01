@@ -509,7 +509,7 @@ cp_remvar(char *varname)
 /* Determine the value of a variable.  Fail if the variable is unset,
  * and if the type doesn't match, try and make it work...  */
 bool
-cp_getvar(char *name, enum cp_types type, void *retval)
+cp_getvar(char *name, enum cp_types type, void *retval, size_t rsize)
 {
     struct variable *v;
     struct variable *uv1;
@@ -563,7 +563,12 @@ cp_getvar(char *name, enum cp_types type, void *retval)
             case CP_STRING: {   /* Gotta be careful to have room. */
                 char *s = cp_unquote(v->va_string);
                 cp_wstrip(s);
-                strcpy((char*) retval, s);
+                if (strlen(s) >= rsize - 1) {
+                    fprintf(stderr, "Internal Error: string length for variable %s is limited to %zu chars\n", v->va_name, rsize);
+                    controlled_exit(EXIT_BAD);
+                }
+                else
+                    strcpy((char*) retval, s);
                 tfree(s);
                 break;
             }
@@ -678,20 +683,20 @@ cp_variablesubst(wordlist *wlist)
                 char *x = nwl->wl_word;
                 char *tail_ = copy(tail);
                 nwl->wl_word = tprintf("%.*s%s", prefix_len, wl->wl_word, nwl->wl_word);
-                free(x);
+                tfree(x);
                 if (wlist == wl)
                     wlist = nwl;
                 wl = wl_splice(wl, nwl);
                 i = (int) strlen(wl->wl_word);
                 x = wl->wl_word;
                 wl->wl_word = tprintf("%s%s", wl->wl_word, tail_);
-                free(x);
-                free(tail_);
+                tfree(x);
+                tfree(tail_);
             } else if (prefix_len || *tail) {
                 char *x = wl->wl_word;
                 wl->wl_word = tprintf("%.*s%s", prefix_len, wl->wl_word, tail);
                 i = prefix_len;
-                free(x);
+                tfree(x);
             } else {
                 wordlist *next = wl->wl_next;
                 if (wlist == wl)
@@ -713,12 +718,14 @@ cp_variablesubst(wordlist *wlist)
 wordlist *
 vareval(char *string)
 {
-    struct variable *v;
+    struct variable *v, *vfree = NULL;
     wordlist *wl;
     char buf[BSIZE_SP], *s;
     char *oldstring = copy(string);
     char *range = NULL;
-    int i, up, low;
+    int i, up, low, tbfreed;
+
+    /* usage of vfree: variable v has to be freed only if created by cp_enqvar()! */
 
     cp_wstrip(string);
     if ((s = strchr(string, '[')) != NULL) {
@@ -754,9 +761,13 @@ vareval(char *string)
         for (v = variables; v; v = v->va_next)
             if (eq(v->va_name, string))
                 break;
-        if (!v)
-            v = cp_enqvar(string);
+        if (!v) {
+            v = cp_enqvar(string, &tbfreed);
+            if (tbfreed)
+                vfree = v;
+        }
         wl = wl_cons(copy(v ? "1" : "0"), NULL);
+        free_struct_variable(vfree);
         tfree(oldstring);
         return (wl);
 
@@ -765,8 +776,11 @@ vareval(char *string)
         for (v = variables; v; v = v->va_next)
             if (eq(v->va_name, string))
                 break;
-        if (!v)
-            v = cp_enqvar(string);
+        if (!v) {
+            v = cp_enqvar(string, &tbfreed);
+            if (tbfreed)
+                vfree = v;
+        }
         if (!v) {
             fprintf(cp_err, "Error: %s: no such variable.\n", string);
             tfree(oldstring);
@@ -779,6 +793,7 @@ vareval(char *string)
             i = (v->va_type != CP_BOOL);
         wl = wl_cons(tprintf("%d", i), NULL);
         tfree(oldstring);
+        free_struct_variable(vfree);
         return (wl);
 
     case '\0':
@@ -787,6 +802,7 @@ vareval(char *string)
         return (wl);
     }
 
+    vfree = NULL; //just in case ...
     /* The notation var[stuff] has two meanings...  If this is a real
      * variable, then the [] denotes range, but if this is a strange
      * (e.g, device parameter) variable, it could be anything...
@@ -803,7 +819,9 @@ vareval(char *string)
     if (!v) {
         range = NULL;
         string = oldstring;
-        v = cp_enqvar(string);
+        v = cp_enqvar(string, &tbfreed);
+        if (tbfreed)
+            vfree = v;
     }
     if (!v && (s = getenv(string)) != NULL) {
         wl = wl_cons(copy(s), NULL);
@@ -816,6 +834,7 @@ vareval(char *string)
         return (NULL);
     }
     wl = cp_varwl(v);
+    free_struct_variable(vfree);
 
     /* Now parse and deal with 'range' ... */
     if (range) {

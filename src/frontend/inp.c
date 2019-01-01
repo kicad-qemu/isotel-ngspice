@@ -53,15 +53,27 @@ static char *upper(register char *string);
 static bool doedit(char *filename);
 static struct card *com_options = NULL;
 static struct card *mc_deck = NULL;
+static struct card *recent_deck = NULL;
 static void cktislinear(CKTcircuit *ckt, struct card *deck);
 static void dotifeval(struct card *deck);
+static void recifeval(struct card *pdeck);
 
 static wordlist *inp_savecurrents(struct card *deck, struct card *options, wordlist *wl, wordlist *controls);
 
+static void eval_agauss(struct card *deck, char *fcn);
 void line_free_x(struct card *deck, bool recurse);
 void create_circbyline(char *line);
+//void inp_source_recent(void);
+//void inp_mc_free(void);
+//void inp_remove_recent(void);
+static bool mc_reload = FALSE;
+void eval_seed_opt(struct card *deck);
 
 extern bool ft_batchmode;
+
+#ifdef SHARED_MODULE
+extern void exec_controls(wordlist *controls);
+#endif
 
 /* structure used to save expression parse trees for .model and
  * device instance lines
@@ -200,7 +212,7 @@ inp_list(FILE *file, struct card *deck, struct card *extras, int type)
         file = cp_more;
     }
 
-    renumber = cp_getvar("renumber", CP_BOOL, NULL);
+    renumber = cp_getvar("renumber", CP_BOOL, NULL, 0);
 
     if (type == LS_LOGICAL) {
     top1:
@@ -330,13 +342,88 @@ line_reverse(struct card *head)
 }
 
 
-/* free mc_deck */
+/* store ft_curckt->ci_mcdeck into a 'previous' deck */
 void
-mc_free(void)
+inp_mc_free(void)
 {
-    line_free(mc_deck, TRUE);
+    if (ft_curckt && ft_curckt->ci_mcdeck) {
+        if (recent_deck && recent_deck != ft_curckt->ci_mcdeck) {
+            struct circ *pp;
+            /* NULL any ci_mcdeck entry from ft_circuits whose address equals recent_deck,
+            then free this address */
+            for (pp = ft_circuits; pp; pp = pp->ci_next)
+                if (pp->ci_mcdeck == recent_deck) {
+                    pp->ci_mcdeck = NULL;
+                }
+            line_free(recent_deck, TRUE);
+        }
+        recent_deck = ft_curckt->ci_mcdeck;
+        ft_curckt->ci_mcdeck = NULL;
+    }
 }
 
+/* called by com_rset: reload most recent circuit */
+void
+inp_source_recent(void) {
+    mc_deck = recent_deck;
+    mc_reload = TRUE;
+    inp_spsource(NULL, FALSE, NULL, FALSE);
+}
+
+/* remove the 'recent' deck */
+void
+inp_remove_recent(void) {
+    if (recent_deck)
+        line_free(recent_deck, TRUE);
+}
+
+/* check for .option seed=[val|random] and set the random number generator */
+void
+eval_seed_opt(struct card *deck)
+{
+    struct card *card;
+    bool has_seed = FALSE;
+
+    for (card = deck; card; card = card->nextcard) {
+        char *line = card->line;
+        if (*line == '*')
+            continue;
+        if (ciprefix(".option", line) || ciprefix("option", line)) {
+            /* option seedinfo */
+            if (strstr(line, "seedinfo"))
+                setseedinfo();
+            char *begtok = strstr(line, "seed=");
+            if (begtok)
+                begtok = &begtok[5]; /*skip seed=*/
+            if (begtok) {
+                if (has_seed)
+                    fprintf(cp_err, "Warning: Multiple 'option seed=val|random' found!\n");
+                char *token = gettok(&begtok);
+                /* option seed=random [seed='random'] */
+                if (eq(token, "random") || eq(token, "{random}")) {
+                    time_t acttime = time(NULL);
+                    /* get random value from time in seconds since 1.1.1970 */
+                    int rseed = (int)(acttime - 1470000000);
+                    cp_vset("rndseed", CP_NUM, &rseed);
+                    com_sseed(NULL);
+                    has_seed = TRUE;
+                }
+                /* option seed=val*/
+                else {
+                    int sr = atoi(token);
+                    if (sr <= 0)
+                        fprintf(cp_err, "Warning: Cannot convert 'option seed=%s' to seed value, skipped!\n", token);
+                    else {
+                        cp_vset("rndseed", CP_NUM, &sr);
+                        com_sseed(NULL);
+                        has_seed = TRUE;
+                    }
+                }
+                tfree(token);
+            }
+        }
+    }
+}
 
 /* The routine to source a spice input deck. We read the deck in, take
  * out the front-end commands, and create a CKT structure. Also we
@@ -379,28 +466,62 @@ inp_spsource(FILE *fp, bool comfile, char *filename, bool intfile)
     if (fp || intfile) {
         deck = inp_readall(fp, dir_name, comfile, intfile, &expr_w_temper);
 
+        /* here we check for .option seed=[val|random] and set the random number generator */
+        eval_seed_opt(deck);
         /* files starting with *ng_script are user supplied command files */
         if (deck && ciprefix("*ng_script", deck->line))
             comfile = TRUE;
         /* save a copy of the deck for later reloading with 'mc_source' */
         if (deck && !comfile) {
-            if (mc_deck)
-                mc_free();
+        /* stored to new circuit ci_mcdeck in fcn */
             mc_deck = inp_deckcopy_oc(deck);
         }
     }
     /* called with *fp == NULL and not intfile: we want to reload circuit from mc_deck */
     else {
-        if (mc_deck) {
+        /* re-load deck due to command 'reset' via function inp_source_recent() */
+        if (mc_reload && mc_deck) {
+            deck = inp_deckcopy(mc_deck);
+            expr_w_temper = TRUE;
+            mc_reload = FALSE;
+            fprintf(stdout, "Reset re-loads circuit %s\n", mc_deck->line);
+        }
+        /* re-load input deck from the current circuit structure */
+        else if (ft_curckt && ft_curckt->ci_mcdeck) {
+            deck = inp_deckcopy(ft_curckt->ci_mcdeck);
+            expr_w_temper = TRUE;
+        }
+        /* re-load input deck from the recent circuit structure with mc_source */
+        else if (!ft_curckt && mc_deck) {
             deck = inp_deckcopy(mc_deck);
             expr_w_temper = TRUE;
         }
+        /* no circuit available, should not happen */
         else {
-            fprintf(stderr, "Error: No circuit loaded, cannot copy internally using mc_source\n");
+            fprintf(stderr, "Error: No circuit loaded, cannot copy internally using mc_source or reset\n");
             controlled_exit(1);
+        }
+        /* print out the re-loaded deck into debug-out-mc.txt */
+        if (ft_ngdebug) {
+            /*debug: print into file*/
+            FILE *fdo = fopen("debug-out-mc.txt", "w");
+            if (fdo) {
+                struct card *tc = NULL;
+                fprintf(fdo, "****************** complete mc deck ***************\n\n");
+                /* now completely */
+                for (tc = deck; tc; tc = tc->nextcard)
+                    fprintf(fdo, "%6d  %6d  %s\n", tc->linenum_orig, tc->linenum, tc->line);
+                fclose(fdo);
+            }
+            else
+                fprintf(stderr, "Warning: Cannot open file debug-out-mc.txt for saving debug info\n");
         }
     }
     endTime = seconds();
+    /* store input directory to a variable*/
+    if (fp) {
+        cp_vset("inputdir", CP_STRING, dir_name);
+    }
     tfree(dir_name);
 
     /* if nothing came back from inp_readall, just close fp and return to caller */
@@ -482,7 +603,7 @@ inp_spsource(FILE *fp, bool comfile, char *filename, bool intfile)
                 s = skip_ws(dd->line + 5);
                 if (temperature)
                     txfree(temperature);
-                temperature = strdup(s);
+                temperature = copy(s);
             }
             /* Ignore comment lines, but not lines begining with '*#',
                but remove them, if they are in a .control ... .endc section */
@@ -588,7 +709,7 @@ inp_spsource(FILE *fp, bool comfile, char *filename, bool intfile)
             cp_vset("pretemp", CP_REAL, &temperature_value);
         }
         if (ft_ngdebug) {
-            cp_getvar("pretemp", CP_REAL, &testemp);
+            cp_getvar("pretemp", CP_REAL, &testemp, 0);
             printf("test temperature %f\n", testemp);
         }
 
@@ -599,8 +720,14 @@ inp_spsource(FILE *fp, bool comfile, char *filename, bool intfile)
 #ifdef HAS_PROGREP
             SetAnalyse("Prepare Deck", 0);
 #endif
+            /*FIXME This is for the globel param setting only */
+            /* replace agauss(x,y,z) in each b-line by suitable value */
+            static char *statfcn[] = { "agauss", "gauss", "aunif", "unif", "limit" };
+            int ii;
+            for (ii = 0; ii < 5; ii++)
+                eval_agauss(deck, statfcn[ii]);
             /* Now expand subcircuit macros and substitute numparams.*/
-            if (!cp_getvar("nosubckt", CP_BOOL, NULL))
+            if (!cp_getvar("nosubckt", CP_BOOL, NULL, 0))
                 if ((deck->nextcard = inp_subcktexpand(deck->nextcard)) == NULL) {
                     line_free(realdeck, TRUE);
                     line_free(deck->actualLine, TRUE);
@@ -622,20 +749,20 @@ inp_spsource(FILE *fp, bool comfile, char *filename, bool intfile)
                 /*debug: print into file*/
                 FILE *fdo = fopen("debug-out2.txt", "w");
                 if (fdo) {
-                    struct card *t = NULL;
+                    struct card *tc = NULL;
                     fprintf(fdo, "**************** uncommented deck **************\n\n");
                     /* always print first line */
                     fprintf(fdo, "%6d  %6d  %s\n", deck->linenum_orig, deck->linenum, deck->line);
                     /* here without out-commented lines */
-                    for (t = deck->nextcard; t; t = t->nextcard) {
-                        if (*(t->line) == '*')
+                    for (tc = deck->nextcard; tc; tc = tc->nextcard) {
+                        if (*(tc->line) == '*')
                             continue;
-                        fprintf(fdo, "%6d  %6d  %s\n", t->linenum_orig, t->linenum, t->line);
+                        fprintf(fdo, "%6d  %6d  %s\n", tc->linenum_orig, tc->linenum, tc->line);
                     }
                     fprintf(fdo, "\n****************** complete deck ***************\n\n");
                     /* now completely */
-                    for (t = deck; t; t = t->nextcard)
-                        fprintf(fdo, "%6d  %6d  %s\n", t->linenum_orig, t->linenum, t->line);
+                    for (tc = deck; tc; tc = tc->nextcard)
+                        fprintf(fdo, "%6d  %6d  %s\n", tc->linenum_orig, tc->linenum, tc->line);
                     fclose(fdo);
                 }
                 else
@@ -678,6 +805,13 @@ inp_spsource(FILE *fp, bool comfile, char *filename, bool intfile)
             if (expr_w_temper)
                 inp_parse_temper(deck, &modtlist, &devtlist);
 
+            /* replace agauss(x,y,z) in each b-line by suitable value */
+            /* FIXME: This is for the local param setting (not yet implemented in
+            inp_fix_agauss_in_param() for model parameters according to HSPICE manual)
+            static char *statfcn[] = { "agauss", "gauss", "aunif", "unif", "limit" };
+            int ii;
+            for (ii = 0; ii < 5; ii++)
+                eval_agauss(deck, statfcn[ii]); */
             /* If user wants all currents saved (.options savecurrents), add .save 
             to wl_first with all terminal currents available on selected devices */
             wl_first = inp_savecurrents(deck, options, wl_first, controls);
@@ -685,8 +819,10 @@ inp_spsource(FILE *fp, bool comfile, char *filename, bool intfile)
             /* now load deck into ft_curckt -- the current circuit. */
             inp_dodeck(deck, tt, wl_first, FALSE, options, filename);
 
-            ft_curckt->devtlist = devtlist;
-            ft_curckt->modtlist = modtlist;
+            if (ft_curckt) {
+                ft_curckt->devtlist = devtlist;
+                ft_curckt->modtlist = modtlist;
+            }
 
             /* inp_dodeck did take ownership */
             tt = NULL;
@@ -722,8 +858,9 @@ inp_spsource(FILE *fp, bool comfile, char *filename, bool intfile)
                 }
             }
 
+            /* remove the .measure cards from the deckand store them in ft_curckt->ci_meas */
             if (ciprefix(".meas", dd->line)) {
-                if (cp_getvar("autostop", CP_BOOL, NULL)) {
+                if (cp_getvar("autostop", CP_BOOL, NULL, 0)) {
                     if (strstr(dd->line, " max ") ||
                         strstr(dd->line, " min ") ||
                         strstr(dd->line, " avg ") ||
@@ -768,20 +905,20 @@ inp_spsource(FILE *fp, bool comfile, char *filename, bool intfile)
             /*debug: print into file*/
             FILE *fdo = fopen("debug-out3.txt", "w");
             if (fdo) {
-                struct card *t = NULL;
+                struct card *tc = NULL;
                 fprintf(fdo, "**************** uncommented deck **************\n\n");
                 /* always print first line */
                 fprintf(fdo, "%6d  %6d  %s\n", deck->linenum_orig, deck->linenum, deck->line);
                 /* here without out-commented lines */
-                for (t = deck->nextcard; t; t = t->nextcard) {
-                    if (*(t->line) == '*')
+                for (tc = deck->nextcard; tc; tc = tc->nextcard) {
+                    if (*(tc->line) == '*')
                         continue;
-                    fprintf(fdo, "%6d  %6d  %s\n", t->linenum_orig, t->linenum, t->line);
+                    fprintf(fdo, "%6d  %6d  %s\n", tc->linenum_orig, tc->linenum, tc->line);
                 }
                 fprintf(fdo, "\n****************** complete deck ***************\n\n");
                 /* now completely */
-                for (t = deck; t; t = t->nextcard)
-                    fprintf(fdo, "%6d  %6d  %s\n", t->linenum_orig, t->linenum, t->line);
+                for (tc = deck; tc; tc = tc->nextcard)
+                    fprintf(fdo, "%6d  %6d  %s\n", tc->linenum_orig, tc->linenum, tc->line);
                 fclose(fdo);
             }
             else
@@ -804,8 +941,23 @@ inp_spsource(FILE *fp, bool comfile, char *filename, bool intfile)
 
         /* Now that the deck is loaded, do the commands, if there are any */
         controls = wl_reverse(controls);
+
+        /* in shared ngspice controls a execute in the primary thread, typically
+           before the background thread has finished. This leads to premature execution
+           of commands. Thus this is delegated to a function using a third thread, that
+           only start when the background threas has finished (sharedspice.c).*/
+#ifdef SHARED_MODULE
+        for (wl = controls; wl; wl = wl->wl_next)
+            if (cp_getvar("controlswait", CP_BOOL, NULL, 0)) {
+                exec_controls(wl_copy(wl));
+                break;
+            }
+            else
+                cp_evloop(wl->wl_word);
+#else
         for (wl = controls; wl; wl = wl->wl_next)
             cp_evloop(wl->wl_word);
+#endif
         wl_free(controls);
     }
 
@@ -876,7 +1028,7 @@ inp_dodeck(
         /*PN FTESTATS*/
         ft_curckt->FTEstats = TMALLOC(FTESTATistics, 1);
     }
-    noparse = cp_getvar("noparse", CP_BOOL, NULL);
+    noparse = cp_getvar("noparse", CP_BOOL, NULL, 0);
 
 
     /* We check preliminary for the scale option. This special processing
@@ -944,12 +1096,12 @@ inp_dodeck(
     out_init();
     /* if_inpdeck() may return NULL upon error */
     if (ckt) {
-        if (cp_getvar("warn", CP_NUM, &warn))
+        if (cp_getvar("warn", CP_NUM, &warn, 0))
             ckt->CKTsoaCheck = warn;
         else
             ckt->CKTsoaCheck = 0;
 
-        if (cp_getvar("maxwarns", CP_NUM, &maxwarns))
+        if (cp_getvar("maxwarns", CP_NUM, &maxwarns, 0))
             ckt->CKTsoaMaxWarns = maxwarns;
         else
             ckt->CKTsoaMaxWarns = 5;
@@ -1017,7 +1169,7 @@ inp_dodeck(
     }
 
     /* Only print out netlist if brief is FALSE */
-    if (!cp_getvar("brief", CP_BOOL, NULL)) {
+    if (!cp_getvar("brief", CP_BOOL, NULL, 0)) {
         /* output deck */
         out_printf("\nProcessed Netlist\n");
         out_printf("=================\n");
@@ -1047,6 +1199,7 @@ inp_dodeck(
     }
     ct->ci_name = tt;
     ct->ci_deck = deck;
+    ct->ci_mcdeck = mc_deck;
     ct->ci_options = options;
     if (deck->actualLine)
         ct->ci_origdeck = deck->actualLine;
@@ -1137,7 +1290,7 @@ com_edit(wordlist *wl)
     bool inter, permfile;
     char buf[BSIZE_SP];
 
-    if (!cp_getvar("interactive", CP_BOOL, NULL)) {
+    if (!cp_getvar("interactive", CP_BOOL, NULL, 0)) {
         fprintf(cp_err,
                 "Warning: `edit' is disabled because 'interactive' has not been set.\n"
                 "  perhaps you want to 'set interactive'\n");
@@ -1231,10 +1384,17 @@ com_alterparam(wordlist *wl)
     char *pname, *pval, *tmp, *subcktname = NULL, *linein, *linefree, *s;
     bool found = FALSE;
 
-    if (!mc_deck) {
-        fprintf(cp_err, "Error: No internal deck available\n");
+    if (!ft_curckt) {
+        fprintf(stderr, "Warning: No circuit loaded!\n");
+        fprintf(stderr, "    Command 'alterparam' ignored\n");
         return;
     }
+    if (!ft_curckt->ci_mcdeck) {
+        fprintf(cp_err, "Error: No internal deck available\n");
+        fprintf(stderr, "    Command 'alterparam' ignored\n");
+        return;
+    }
+
     linefree = wl_flatten(wl);
     linein = skip_ws(linefree);
     s = tmp = gettok_char(&linein, '=', FALSE, FALSE);
@@ -1260,7 +1420,7 @@ com_alterparam(wordlist *wl)
     }
     tfree(linefree);
     tfree(s);
-    for (dd = mc_deck->nextcard; dd; dd = dd->nextcard) {
+    for (dd = ft_curckt->ci_mcdeck->nextcard; dd; dd = dd->nextcard) {
         char *curr_line = dd->line;
         /* alterparam subcktname pname=vpval
            Parameters from within subcircuit are no longer .param lines, but have been added to
@@ -1298,7 +1458,7 @@ com_alterparam(wordlist *wl)
                         /* find x line with same subcircuit name */
                         struct card *xx;
                         char *bsubb = tprintf(" %s ", subcktname);
-                        for (xx = mc_deck->nextcard; xx; xx = xx->nextcard) {
+                        for (xx = ft_curckt->ci_mcdeck->nextcard; xx; xx = xx->nextcard) {
                             char *xline = xx->line;
                             if (*xline == 'x') {
                                 xline = strstr(xline, bsubb);
@@ -1357,7 +1517,7 @@ doedit(char *filename)
 {
     char buf[BSIZE_SP], buf2[BSIZE_SP], *editor;
 
-    if (cp_getvar("editor", CP_STRING, buf2)) {
+    if (cp_getvar("editor", CP_STRING, buf2, sizeof(buf2))) {
         editor = buf2;
     } else {
         if ((editor = getenv("EDITOR")) == NULL) {
@@ -1527,14 +1687,73 @@ com_circbyline(wordlist *wl)
     create_circbyline(newline);
 }
 
-
 /* handle .if('expr') ... .elseif('expr') ... .else ... .endif statements.
    numparam has evaluated .if('boolean expression') to
-   .if (   1.000000000e+000  ) or .elseif (   0.000000000e+000  ) */
+   .if (   1.000000000e+000  ) or .elseif (   0.000000000e+000  ).
+   Evaluation is done recursively, starting with .IF, ending with .ENDIF*/
+static void
+recifeval(struct card *pdeck)
+{
+    struct card *nd;
+    int iftrue = 0, elseiftrue = 0, elsetrue = 0, iffound = 0, elseiffound = 0, elsefound = 0;
+    char *t;
+    char *s = t = pdeck->line;
+    /* get parameter to .if */
+    elsefound = 0;
+    elseiffound = 0;
+    iffound = 1;
+    *t = '*';
+    s = pdeck->line + 3;
+    iftrue = atoi(s);
+    nd = pdeck->nextcard;
+
+    while(nd) {
+        s = nd->line;
+        if (ciprefix(".if", nd->line))
+            recifeval(nd);
+        else if (ciprefix(".elseif", nd->line) && elseiftrue == 0) {
+            elsefound = 0;
+            elseiffound = 1;
+            iffound = 0;
+            *s = '*';
+            if (!iftrue) {
+                s = nd->line + 7;
+                elseiftrue = atoi(s);
+            }
+        }
+        else if (ciprefix(".else", nd->line)) {
+            elsefound = 1;
+            elseiffound = 0;
+            iffound = 0;
+            if (!iftrue && !elseiftrue)
+                elsetrue = 1;
+            *s = '*';
+        }
+        else if (ciprefix(".endif", nd->line)) {
+            elsefound = elseiffound = iffound = 0;
+            elsetrue = elseiftrue = iftrue = 0;
+            *s = '*';
+            return;
+        }
+        else {
+            if (iffound && !iftrue) {
+                *s = '*';
+            }
+            else if (elseiffound && !elseiftrue) {
+                *s = '*';
+            }
+            else if (elsefound && !elsetrue) {
+                *s = '*';
+            }
+        }
+        nd = nd->nextcard;
+    }
+}
+
+/* Scan through all lines of the deck */
 static void
 dotifeval(struct card *deck)
 {
-    int iftrue = 0, elseiftrue = 0, elsetrue = 0, iffound = 0, elseiffound = 0, elsefound = 0;
     struct card *dd;
     char *dottoken;
     char *s, *t;
@@ -1548,49 +1767,10 @@ dotifeval(struct card *deck)
             continue;
 
         dottoken = gettok(&t);
-        /* find '.if' and read its parameter */
+        /* find '.if', the starter of any .if --- .endif clause, and call the recursive evaluation.
+           recifeval() returns when .endif is found */
         if (cieq(dottoken, ".if")) {
-            elsefound = 0;
-            elseiffound = 0;
-            iffound = 1;
-            *s = '*';
-            s = dd->line + 3;
-            iftrue = atoi(s);
-        }
-        else if (cieq(dottoken, ".elseif")) {
-            elsefound = 0;
-            elseiffound = 1;
-            iffound = 0;
-            *s = '*';
-            if (!iftrue) {
-                s = dd->line + 7;
-                elseiftrue = atoi(s);
-            }
-        }
-        else if (cieq(dottoken, ".else")) {
-            elsefound = 1;
-            elseiffound = 0;
-            iffound = 0;
-            if (!iftrue && !elseiftrue)
-                elsetrue = 1;
-            *s = '*';
-        }
-        else if (cieq(dottoken, ".endif")) {
-            elsefound = elseiffound = iffound = 0;
-            elsetrue = elseiftrue = iftrue = 0;
-            *s = '*';
-//          inp_subcktexpand(dd);
-        }
-        else {
-            if (iffound && !iftrue) {
-                *s = '*';
-            }
-            else if (elseiffound && !elseiftrue)  {
-                *s = '*';
-            }
-            else if (elsefound && !elsetrue)  {
-                *s = '*';
-            }
+            recifeval(dd);
         }
         tfree(dottoken);
     }
@@ -1872,4 +2052,143 @@ inp_savecurrents(struct card *deck, struct card *options, wordlist *wl, wordlist
     }
 
     return wl_append(wl, wl_reverse(p));
+}
+
+
+static double
+agauss(double nominal_val, double abs_variation, double sigma)
+{
+    double stdvar;
+    stdvar = abs_variation / sigma;
+    return (nominal_val + stdvar * gauss1());
+}
+
+
+static double
+gauss(double nominal_val, double rel_variation, double sigma)
+{
+    double stdvar;
+    stdvar = nominal_val * rel_variation / sigma;
+    return (nominal_val + stdvar * gauss1());
+}
+
+
+static double
+unif(double nominal_val, double rel_variation)
+{
+    return (nominal_val + nominal_val * rel_variation * drand());
+}
+
+
+static double
+aunif(double nominal_val, double abs_variation)
+{
+    return (nominal_val + abs_variation * drand());
+}
+
+
+static double
+limit(double nominal_val, double abs_variation)
+{
+    return (nominal_val + (drand() > 0 ? abs_variation : -1. * abs_variation));
+}
+
+
+/* Second step to enable functions agauss, gauss, aunif, unif, limit
+ * in professional parameter decks:
+ * agauss has been preserved by replacement operation of .func
+ * (function inp_fix_agauss_in_param() in inpcom.c).
+ * After subcircuit expansion, agauss may be still existing in b-lines,
+ * however agauss does not exist in the B source parser, and it would
+ * not make sense in adding it there, because in each time step a different
+ * return from agauss would result.
+ * So we have to do the following in each B-line:
+ * check for agauss(x,y,z), and replace it by a suitable return value
+ * of agauss()
+ * agauss  in .param lines has been treated already
+ */
+
+static void
+eval_agauss(struct card *deck, char *fcn)
+{
+    struct card *card;
+    double x, y, z, val;
+    int skip_control = 0;
+
+    card = deck;
+    for (; card; card = card->nextcard) {
+
+        char *ap, *curr_line = card->line;
+
+        /* exclude any command inside .control ... .endc */
+        if (ciprefix(".control", curr_line)) {
+            skip_control++;
+            continue;
+        }
+        else if (ciprefix(".endc", curr_line)) {
+            skip_control--;
+            continue;
+        }
+        else if (skip_control > 0) {
+            continue;
+        }
+
+        if (*curr_line != 'b')
+            continue;
+
+        while ((ap = search_identifier(curr_line, fcn, curr_line)) != NULL) {
+            char *lparen, *begstr, *contstr = NULL, *new_line, *midstr;
+            char *tmp1str, *tmp2str, *delstr;
+            int nerror;
+
+            begstr = copy_substring(curr_line, ap);
+            lparen = strchr(ap, '(');
+            tmp1str = midstr = gettok_char(&lparen, ')', FALSE, TRUE);
+            if (lparen + 1)
+                contstr = copy(lparen + 1);
+            tmp1str++; /* skip '(' */
+            /* find the parameters */
+            delstr = tmp2str = gettok(&tmp1str);
+            x = INPevaluate(&tmp2str, &nerror, 1);
+            tfree(delstr);
+            delstr = tmp2str = gettok(&tmp1str);
+            y = INPevaluate(&tmp2str, &nerror, 1);
+            tfree(delstr);
+            if (cieq(fcn, "agauss")) {
+                delstr = tmp2str = gettok(&tmp1str);
+                z = INPevaluate(&tmp2str, &nerror, 1);
+                tfree(delstr);
+                val = agauss(x, y, z);
+            }
+            else if (cieq(fcn, "gauss")) {
+                delstr = tmp2str = gettok(&tmp1str);
+                z = INPevaluate(&tmp2str, &nerror, 1);
+                tfree(delstr);
+                val = gauss(x, y, z);
+            }
+            else if (cieq(fcn, "aunif")) {
+                val = aunif(x, y);
+            }
+            else if (cieq(fcn, "unif")) {
+                val = unif(x, y);
+            }
+            else if (cieq(fcn, "limit")) {
+                val = limit(x, y);
+            }
+            else {
+                fprintf(cp_err, "ERROR: Unknown function %s, cannot evaluate\n", fcn);
+                tfree(begstr);
+                tfree(contstr);
+                tfree(midstr);
+                return;
+            }
+
+            new_line = tprintf("%s%g%s", begstr, val, contstr);
+            tfree(card->line);
+            curr_line = card->line = new_line;
+            tfree(begstr);
+            tfree(contstr);
+            tfree(midstr);
+        }
+    }
 }

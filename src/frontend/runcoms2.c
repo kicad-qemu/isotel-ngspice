@@ -27,10 +27,12 @@ Author: 1985 Wayne A. Christopher, U. C. Berkeley CAD Group
 
 #include "ngspice/inpdefs.h"
 
-#define RAWBUF_SIZE 32768
-extern char rawfileBuf[RAWBUF_SIZE];
 extern void line_free_x(struct card *deck, bool recurse);
 extern INPmodel *modtab;
+
+#ifdef SHARED_MODULE
+extern void exec_controls(wordlist *newcontrols);
+#endif
 
 #define line_free(line, flag)                   \
     do {                                        \
@@ -91,7 +93,7 @@ com_resume(wordlist *wl)
     if (last_used_rawfile)
         dofile = TRUE;
 
-    if (cp_getvar("filetype", CP_STRING, buf)) {
+    if (cp_getvar("filetype", CP_STRING, buf, sizeof(buf))) {
         if (eq(buf, "binary"))
             ascii = FALSE;
         else if (eq(buf, "ascii"))
@@ -108,14 +110,12 @@ com_resume(wordlist *wl)
         /* ask if binary or ASCII, open file with w or wb   hvogt 15.3.2000 */
         else if (ascii) {
             if ((rawfileFp = fopen(last_used_rawfile, "a")) == NULL) {
-                setvbuf(rawfileFp, rawfileBuf, _IOFBF, RAWBUF_SIZE);
                 perror(last_used_rawfile);
                 ft_setflag = FALSE;
                 return;
             }
         } else if (!ascii) {
             if ((rawfileFp = fopen(last_used_rawfile, "ab")) == NULL) {
-                setvbuf(rawfileFp, rawfileBuf, _IOFBF, RAWBUF_SIZE);
                 perror(last_used_rawfile);
                 ft_setflag = FALSE;
                 return;
@@ -124,7 +124,6 @@ com_resume(wordlist *wl)
         /*---------------------------------------------------------------------------*/
 #else
         else if (!(rawfileFp = fopen(last_used_rawfile, "a"))) {
-            setvbuf(rawfileFp, rawfileBuf, _IOFBF, RAWBUF_SIZE);
             perror(last_used_rawfile);
             ft_setflag = FALSE;
             return;
@@ -171,9 +170,20 @@ com_resume(wordlist *wl)
 void
 com_rset(wordlist *wl)
 {
-    struct variable *v, *next;
-
     NG_IGNORE(wl);
+
+#if (1)
+    if (ft_curckt == NULL) {
+        fprintf(cp_err, "Error: there is no circuit loaded.\n");
+        return;
+    }
+    com_remcirc(NULL);
+#ifdef SHARED_MODULE
+    exec_controls(NULL);
+#endif
+    inp_source_recent();
+#else
+    struct variable *v, *next;
 
     if (ft_curckt == NULL) {
         fprintf(cp_err, "Error: there is no circuit loaded.\n");
@@ -190,6 +200,7 @@ com_rset(wordlist *wl)
 
     inp_dodeck(ft_curckt->ci_deck, ft_curckt->ci_name, NULL,
                TRUE, ft_curckt->ci_options, ft_curckt->ci_filename);
+#endif
 }
 
 
@@ -236,6 +247,8 @@ com_remcirc(wordlist *wl)
     for (v = ft_curckt->ci_vars; v; v = next) {
         next = v->va_next;
         tfree(v->va_name);
+        if (v->va_type == CP_STRING)
+            tfree(v->va_string);
         tfree(v);
     }
     ft_curckt->ci_vars = NULL;
@@ -245,6 +258,8 @@ com_remcirc(wordlist *wl)
     dd = ft_curckt->ci_param;
     line_free(dd, TRUE);
     dd = ft_curckt->ci_options;
+    line_free(dd, TRUE);
+    dd = ft_curckt->ci_meas;
     line_free(dd, TRUE);
 
     wl_free(ft_curckt->ci_commands);
@@ -261,6 +276,8 @@ com_remcirc(wordlist *wl)
         tfree(ft_curckt->ci_filename);
     rem_tlist(ft_curckt->devtlist);
     rem_tlist(ft_curckt->modtlist);
+
+    inp_mc_free();
 
     /* delete the actual circuit entry from ft_circuits */
     for (p = ft_circuits; p; p = p->ci_next) {

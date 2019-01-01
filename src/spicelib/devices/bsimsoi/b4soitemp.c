@@ -89,6 +89,13 @@ B4SOItemp(
             model->B4SOIGatesidewallJctSPotential = 0.1;
         if (model->B4SOIGatesidewallJctDPotential < 0.1)        /* v4.0 */
             model->B4SOIGatesidewallJctDPotential = 0.1;
+
+        struct b4soiSizeDependParam *p = model->pSizeDependParamKnot;
+        while (p) {
+            struct b4soiSizeDependParam *next_p = p->pNext;
+            FREE(p);
+            p = next_p;
+        }
         model->pSizeDependParamKnot = NULL;
         pLastKnot = NULL;
 
@@ -185,7 +192,7 @@ B4SOItemp(
             }
 
             if (Size_Not_Found)
-            {   pParam = (struct b4soiSizeDependParam *)malloc(
+            {   pParam = (struct b4soiSizeDependParam *)tmalloc(
                     sizeof(struct b4soiSizeDependParam));
             if (pLastKnot == NULL)
                 model->pSizeDependParamKnot = pParam;

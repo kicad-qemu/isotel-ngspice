@@ -3,6 +3,7 @@
  * Wolfgang Muees 27.10.97
  * Holger Vogt  07.12.01
  * Holger Vogt  05.12.07
+ * Holger Vogt  01.11.18
  */
 
 #include "ngspice/ngspice.h"
@@ -71,7 +72,7 @@ extern void        com_hardcopy(wordlist *wl);
 #define M_LN10  2.30258509299404568402
 #endif
 
-#define DEF_FONTW "Courier"
+#define DEF_FONTW "Arial"
 
 /* local variables */
 static int           IsRegistered = 0;             /* 1 if window class is registered */
@@ -121,11 +122,11 @@ WIN_Init(void)
     /* always, user may have set color0 to white */
     /* get background color information from spinit, only "white"
        is recognized as a suitable option! */
-    if (cp_getvar("color0", CP_STRING, colorstring))
+    if (cp_getvar("color0", CP_STRING, colorstring, sizeof(colorstring)))
         isblack = !cieq(colorstring, "white");
 
     /* get linewidth information from spinit */
-    if (!cp_getvar("xbrushwidth", CP_NUM, &linewidth))
+    if (!cp_getvar("xbrushwidth", CP_NUM, &linewidth, 0))
         linewidth = 0;
     if (linewidth < 0)
         linewidth = 0;
@@ -136,7 +137,7 @@ WIN_Init(void)
         isblackold = isblack;
 
         /* get linewidth information from spinit
-         * if (!cp_getvar("xbrushwidth", CP_NUM, &linewidth))
+         * if (!cp_getvar("xbrushwidth", CP_NUM, &linewidth, 0))
          *     linewidth = 0;
          * if (linewidth < 0)
          *     linewidth = 0;
@@ -265,7 +266,7 @@ HcpyPlotBW(HWND hwnd)
 {
     int bgcolor;
     NG_IGNORE(hwnd);
-    if (cp_getvar("hcopypscolor", CP_NUM, &bgcolor))
+    if (cp_getvar("hcopypscolor", CP_NUM, &bgcolor, 0))
         cp_remvar("hcopypscolor");
     com_hardcopy(NULL);
     return 0;
@@ -859,13 +860,11 @@ WIN_Text_old(char *text, int x, int y, int degrees)
 
 
 int
-WIN_Text(char *text, int x, int y)
+WIN_Text(char *text, int x, int y, int angle)
 {
     tpWindowData wd;
     HFONT hfont;
     LOGFONT lf;
-
-    int CentiDegrees = 0;
 
     if (!currentgraph)
         return 0;
@@ -876,8 +875,8 @@ WIN_Text(char *text, int x, int y)
 
     lf.lfHeight         = (int) (1.1 * currentgraph->fontheight);
     lf.lfWidth          = 0;
-    lf.lfEscapement     = CentiDegrees;
-    lf.lfOrientation    = CentiDegrees;
+    lf.lfEscapement     = angle * 10;
+    lf.lfOrientation    = angle * 10;
     lf.lfWeight         = 500;
     lf.lfItalic         = 0;
     lf.lfUnderline      = 0;
@@ -889,13 +888,11 @@ WIN_Text(char *text, int x, int y)
     lf.lfPitchAndFamily = 0;
 
     /* set up fonts */
-    if (!cp_getvar("wfont", CP_STRING, lf.lfFaceName))
+    if (!cp_getvar("wfont", CP_STRING, lf.lfFaceName, sizeof(lf.lfFaceName)))
         (void) lstrcpy(lf.lfFaceName, DEF_FONTW);
 
-    if (!cp_getvar("wfont_size", CP_NUM, &(lf.lfHeight)))
-        lf.lfHeight = (int) (1.1 * currentgraph->fontheight);
-
-//   lstrcpy (lf.lfFaceName, "Courier"/*"Times New Roman"*/);
+    if (!cp_getvar("wfont_size", CP_NUM, &(lf.lfHeight), 0))
+        lf.lfHeight = (int) (1.3 * currentgraph->fontheight);
 
     hfont = CreateFontIndirect (&lf);
     SelectObject(wd->hDC, hfont);
@@ -1017,7 +1014,7 @@ static void WIN_ScreentoData(GRAPH *graph, int x, int y, double *fx, double *fy)
     {
         lmin = log10(graph->datawindow.ymin);
         lmax = log10(graph->datawindow.ymax);
-        *fy = exp(((graph->absolute.height - y - graph->viewportxoff) *
+        *fy = exp(((graph->absolute.height - y - graph->viewportyoff) *
                    (lmax - lmin) / graph->viewport.height + lmin) * M_LN10);
     } else {
         *fy = ((graph->absolute.height - y) - graph->viewportyoff) *

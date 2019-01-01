@@ -84,7 +84,7 @@ PS_Init(void)
 {
     char pswidth[30], psheight[30];
 
-    if (!cp_getvar("hcopyscale", CP_STRING, psscale)) {
+    if (!cp_getvar("hcopyscale", CP_STRING, psscale, sizeof(psscale))) {
         scale = 1.0;
     } else {
         sscanf(psscale, "%lf", &scale);
@@ -93,7 +93,7 @@ PS_Init(void)
     }
     dispdev->numlinestyles = NUMELEMS(linestyle);
     /* plot color */
-    if (!cp_getvar("hcopypscolor", CP_NUM, &setbgcolor)) {
+    if (!cp_getvar("hcopypscolor", CP_NUM, &setbgcolor, 0)) {
         /* if not set, set plot to b&w and use line styles */
         colorflag = 0;
         dispdev->numcolors = 2;
@@ -102,11 +102,11 @@ PS_Init(void)
         /* get backgroung color and set plot to color */
         colorflag = 1;
         dispdev->numcolors = 21;   /* don't know what the maximum should be */
-        cp_getvar("hcopypstxcolor", CP_NUM, &settxcolor);
+        cp_getvar("hcopypstxcolor", CP_NUM, &settxcolor, 0);
     }
 
     /* plot size */
-    if (!cp_getvar("hcopywidth", CP_STRING, pswidth)) {
+    if (!cp_getvar("hcopywidth", CP_STRING, pswidth, sizeof( pswidth))) {
         dispdev->width = (int)(7.75 * 72.0 * scale);       /* (8 1/2 - 3/4) * 72 */
     } else {
         sscanf(pswidth, "%d", &(dispdev->width));
@@ -115,7 +115,7 @@ PS_Init(void)
         if (dispdev->width >= 10000)
             dispdev->width = 10000;
     }
-    if (!cp_getvar("hcopyheight", CP_STRING, psheight)) {
+    if (!cp_getvar("hcopyheight", CP_STRING, psheight, sizeof(psheight))) {
         dispdev->height = dispdev->width;
     } else {
         sscanf(psheight, "%d", &(dispdev->height));
@@ -135,9 +135,9 @@ PS_Init(void)
      * viewport.height = absolute.height - 2 * viewportyoff
      */
 
-    if (!cp_getvar("hcopyfont", CP_STRING, psfont))
+    if (!cp_getvar("hcopyfont", CP_STRING, psfont, sizeof(psfont)))
         strcpy(psfont, "Helvetica");
-    if (!cp_getvar("hcopyfontsize", CP_STRING, psfontsize)) {
+    if (!cp_getvar("hcopyfontsize", CP_STRING, psfontsize, sizeof(psfontsize))) {
         fontsize = 10;
         fontwidth = 6;
         fontheight = 14;
@@ -202,8 +202,22 @@ PS_NewViewport(GRAPH *graph)
     fprintf(plotfile, "%%%%Creator: nutmeg\n");
     fprintf(plotfile, "%%%%BoundingBox: %d %d %d %d\n", x1, y1, x2, y2);
 
-    fprintf(plotfile, "%g %g scale\n", 1.0 / scale, 1.0 / scale);
+    /* ReEncoding to allow 'extended asccii'
+     * thanks to http://apps.jcns.fz-juelich.de/doku/sc/ps-latin/ */
+    fprintf(plotfile, "/ReEncode { %% inFont outFont encoding | -\n");
+    fprintf(plotfile, "   /MyEncoding exch def\n");
+    fprintf(plotfile, "      exch findfont\n");
+    fprintf(plotfile, "      dup length dict\n");
+    fprintf(plotfile, "      begin\n");
+    fprintf(plotfile, "         {def} forall\n");
+    fprintf(plotfile, "         /Encoding MyEncoding def\n");
+    fprintf(plotfile, "         currentdict\n");
+    fprintf(plotfile, "      end\n");
+    fprintf(plotfile, "      definefont\n");
+    fprintf(plotfile, "} def\n");
+    fprintf(plotfile, "/%s /%sLatin1 ISOLatin1Encoding ReEncode\n", psfont, psfont);
 
+    fprintf(plotfile, "%g %g scale\n", 1.0 / scale, 1.0 / scale);
     if (colorflag == 1) {
         /* set the background to color given in spinit (or 0) */
         PS_SelectColor(setbgcolor);
@@ -215,7 +229,7 @@ PS_NewViewport(GRAPH *graph)
     }
 
     /* set up a reasonable font */
-    fprintf(plotfile, "/%s findfont %d scalefont setfont\n\n",
+    fprintf(plotfile, "/%sLatin1 findfont %d scalefont setfont\n\n",
             psfont, (int) (fontsize * scale));
 
     graph->devdep = TMALLOC(PSdevdep, 1);
@@ -312,7 +326,7 @@ PS_Arc(int x0, int y0, int r, double theta, double delta_theta)
 
 
 int
-PS_Text(char *text, int x, int y)
+PS_Text(char *text, int x, int y, int angle)
 {
     int savedlstyle, savedcolor;
 
@@ -334,7 +348,11 @@ PS_Text(char *text, int x, int y)
     PS_Stroke();
     /* move to (x, y) */
     fprintf(plotfile, "%d %d moveto\n", x + xoff + xtadj, y + yoff + ytadj);
+    /* rotate the text counterclockwise by 'angle' degrees */
+    fprintf(plotfile, "%d rotate\n", angle);
     fprintf(plotfile, "(%s) show\n", text);
+    /* rotate the text back clockwise by 'angle' degrees */
+    fprintf(plotfile, "-%d rotate\n", angle);
 
     DEVDEP(currentgraph).lastx = -1;
     DEVDEP(currentgraph).lasty = -1;
@@ -422,7 +440,7 @@ PS_SelectColor(int colorid)           /* should be replaced by PS_DefineColor */
 
     /* Extract the rgbcolor, format is: "rgb:<red>/<green>/<blue>" */
     sprintf(colorN, "color%d", colorid);
-    if (cp_getvar(colorN, CP_STRING, colorstring)) {
+    if (cp_getvar(colorN, CP_STRING, colorstring, sizeof(colorstring))) {
         for (i = 0; colorstring[i]; i++)
             if (colorstring[i] == '/' || colorstring[i] == ':')
                 colorstring[i] = ' ';

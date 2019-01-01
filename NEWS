@@ -1,3 +1,62 @@
+Ngspice-30, Jan 1st, 2019
+============
+
+- New features:
+    + VDMOS device model has been overhauled extensively
+    + Making the manual is now much more flexible and comfortable,
+      xhtml manual added.
+    + Add pre-defined variable controlswait to enable running .control sections
+      after the simulation has finished (shared ngspice only)
+    + Add an icon to the MS Windows GUI build
+    + Enable more reliable memory usage data
+    + Support libtinfo
+    + add rotation angle to text output, vertcally aligned text for Postscript
+      and Windows y-axis plot labels
+    + enable postscript output for extended ascii. Currently only Western
+      European latin-1 (ISO/IEC 8859-1) encoding is supported
+    + Ancient Xgraph code removed
+
+- Bug fixes:
+    + many bugs fixed (bug tracker nos. 253, 332, 337, 368, 374, 375, 376, 377, 378,
+      379, 380, 381, 384, 385, 386)
+    + ancient bug removed that led to spurious heap corruption of shared ngspice
+      under (very sensitive) Windows 10
+    + memory leaks removed
+
+Ngspice-29, Sept 30th, 2018
+============
+
+- New features:
+    + new variable no_auto_gnd. If set, the automatic replacing of gnd by 0
+      is disabled
+    + new compatibility modes for 'set behavior=??'. ps sets PSPICE, lt sets
+      LTSPICE compatibility, ltps is both for a file added by .include command,
+      psa, lta, and ltpsa are the same for the whole netlist
+    + .if, .elseif, .endif is now evaluated recursively, nested .if are thus
+      enabled
+    + new code model sidiode, that is a simple diode, linear breakdown, reverse
+      and forward regions with smooth overlapp, and optional current limits
+    + configure flag --with-fftw3. If set to 'no', internal fast fourier is used
+      instead of fftw
+    + command setseed to set the seed value for the random number generator
+    + option seed=[val|random]
+    + variable inputdir to remeber and retrieve the last input file directory
+    + example directory 'digital' with analog, behavioral and digital example input files
+    + new XSPICE filesource, d_source, and state-machine examples
+    + + or - maybe part of instance name
+    + Quasi-saturation VDMOS example
+    + add environmental variable SOURCE_DATE_EPOCH to allow reproducible executables
+    + new parameters to command setplot: setplot next, setplot previous
+    + updates to commands cd, rusage, print
+    + introduce diode recombination current part (ISR, NR)
+    + update to bipolar and diode temperature equations
+
+- Bug fixes:
+    + several bug fixes
+    + lots of memory leaks removed, especially when XSPICE circuits are called several
+      times in a loop.
+
+
 Ngspice-28, May 27th, 2018
 ============
 
