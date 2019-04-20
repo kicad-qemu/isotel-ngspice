@@ -89,6 +89,7 @@ REFERENCED FILES
                                       
 #define D_PROCESS_FORMAT_VERSION    0x01
 #define DLEN(x)                     (uint8_t)( ((x)==0) ? 0 : (((x)-1)/8 + 1) )
+#define DIN_SIZE_MAX                256     // also represents a theoretical maximum for 8-bit input length specifier
 
 typedef unsigned char uint8_t;
 
@@ -133,11 +134,11 @@ static void sendheader(Process_t * process, int N_din, int N_dout)
 }
 
 
-static void exchangedata(Process_t * process, double time, uint8_t din[], uint8_t dout[])
+static void dprocess_exchangedata(Process_t * process, double time, uint8_t din[], uint8_t dout[])
 {
     typedef struct {
         double time;
-        uint8_t din[process->N_din];
+        uint8_t din[DIN_SIZE_MAX];
     } __attribute__((packed)) packet_t;
         
     packet_t packet;
@@ -292,7 +293,7 @@ void cm_d_process(ARGS)
                 din[i >> 3] |= (uint8_t)(b << (i & 7));
             }
 
-            exchangedata(local_process, (ONE != *reset) ? TIME : -TIME, din, dout);
+            dprocess_exchangedata(local_process, (ONE != *reset) ? TIME : -TIME, din, dout);
             
             for (int i=0; i<PORT_SIZE(out); i++) {
                 Digital_State_t new_state = ((dout[i >> 3] >> (i & 7)) & 0x01) ? ONE : ZERO;
