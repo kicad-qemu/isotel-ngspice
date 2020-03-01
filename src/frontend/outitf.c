@@ -39,8 +39,8 @@ extern char *spice_analysis_get_description(int index);
 static int beginPlot(JOB *analysisPtr, CKTcircuit *circuitPtr, char *cktName, char *analName,
                      char *refName, int refType, int numNames, char **dataNames, int dataType,
                      bool windowed, runDesc **runp);
-static int addDataDesc(runDesc *run, char *name, int type, int ind);
-static int addSpecialDesc(runDesc *run, char *name, char *devname, char *param, int depind);
+static int addDataDesc(runDesc *run, char *name, int type, int ind, int meminit);
+static int addSpecialDesc(runDesc *run, char *name, char *devname, char *param, int depind, int meminit);
 static void fileInit(runDesc *run);
 static void fileInit_pass2(runDesc *run);
 static void fileStartPoint(FILE *fp, bool bin, int num);
@@ -143,6 +143,7 @@ beginPlot(JOB *analysisPtr, CKTcircuit *circuitPtr, char *cktName, char *analNam
     bool saveall  = TRUE;
     bool savealli = FALSE;
     char *an_name;
+    int initmem;
     /*to resume a run saj
      *All it does is reassign the file pointer and return (requires *runp to be NULL if this is not needed)
      */
@@ -224,9 +225,14 @@ beginPlot(JOB *analysisPtr, CKTcircuit *circuitPtr, char *cktName, char *analNam
             }
         }
 
+        if (numsaves && !saveall)
+            initmem = numsaves;
+        else
+            initmem = numNames;
+
         /* Pass 0. */
         if (refName) {
-            addDataDesc(run, refName, refType, -1);
+            addDataDesc(run, refName, refType, -1, initmem);
             for (i = 0; i < numsaves; i++)
                 if (!savesused[i] && name_eq(saves[i].name, refName)) {
                     savesused[i] = TRUE;
@@ -243,7 +249,7 @@ beginPlot(JOB *analysisPtr, CKTcircuit *circuitPtr, char *cktName, char *analNam
                 if (!savesused[i])
                     for (j = 0; j < numNames; j++)
                         if (name_eq(saves[i].name, dataNames[j])) {
-                            addDataDesc(run, dataNames[j], dataType, j);
+                            addDataDesc(run, dataNames[j], dataType, j, initmem);
                             savesused[i] = TRUE;
                             saves[i].used = 1;
                             break;
@@ -259,7 +265,7 @@ beginPlot(JOB *analysisPtr, CKTcircuit *circuitPtr, char *cktName, char *analNam
                         !strstr(dataNames[i], "#emitter") &&
                         !strstr(dataNames[i], "#base"))
                     {
-                        addDataDesc(run, dataNames[i], dataType, i);
+                        addDataDesc(run, dataNames[i], dataType, i, initmem);
                     }
         }
 
@@ -289,17 +295,17 @@ beginPlot(JOB *analysisPtr, CKTcircuit *circuitPtr, char *cktName, char *analNam
                     } else if (strstr(ch, "#emitter")) {
                         strcpy(ch, "[ie]");
                         if (parseSpecial(tmpname, namebuf, parambuf, depbuf))
-                            addSpecialDesc(run, tmpname, namebuf, parambuf, depind);
+                            addSpecialDesc(run, tmpname, namebuf, parambuf, depind, initmem);
                         strcpy(ch, "[is]");
                     } else if (strstr(ch, "#drain")) {
                         strcpy(ch, "[id]");
                         if (parseSpecial(tmpname, namebuf, parambuf, depbuf))
-                            addSpecialDesc(run, tmpname, namebuf, parambuf, depind);
+                            addSpecialDesc(run, tmpname, namebuf, parambuf, depind, initmem);
                         strcpy(ch, "[ig]");
                     } else if (strstr(ch, "#source")) {
                         strcpy(ch, "[is]");
                         if (parseSpecial(tmpname, namebuf, parambuf, depbuf))
-                            addSpecialDesc(run, tmpname, namebuf, parambuf, depind);
+                            addSpecialDesc(run, tmpname, namebuf, parambuf, depind, initmem);
                         strcpy(ch, "[ib]");
                     } else if (strstr(ch, "#internal") && (tmpname[1] == 'd')) {
                         strcpy(ch, "[id]");
@@ -313,7 +319,7 @@ beginPlot(JOB *analysisPtr, CKTcircuit *circuitPtr, char *cktName, char *analNam
                             fprintf(stderr,
                                     "Warning : unexpected dependent variable on %s\n", tmpname);
                         } else {
-                            addSpecialDesc(run, tmpname, namebuf, parambuf, depind);
+                            addSpecialDesc(run, tmpname, namebuf, parambuf, depind, initmem);
                         }
                     }
                 }
@@ -350,7 +356,7 @@ beginPlot(JOB *analysisPtr, CKTcircuit *circuitPtr, char *cktName, char *analNam
                                 depbuf, saves[i].name);
                         continue;
                     }
-                    addDataDesc(run, dataNames[j], dataType, j);
+                    addDataDesc(run, dataNames[j], dataType, j, initmem);
                     savesused[i] = TRUE;
                     saves[i].used = 1;
                     depind = j;
@@ -359,7 +365,7 @@ beginPlot(JOB *analysisPtr, CKTcircuit *circuitPtr, char *cktName, char *analNam
                 }
             }
 
-            addSpecialDesc(run, saves[i].name, namebuf, parambuf, depind);
+            addSpecialDesc(run, saves[i].name, namebuf, parambuf, depind, initmem);
         }
 
         if (numsaves) {
@@ -413,16 +419,24 @@ beginPlot(JOB *analysisPtr, CKTcircuit *circuitPtr, char *cktName, char *analNam
     return (OK);
 }
 
-
+/* Initialze memory for the list of all vectors in the current plot.
+   Add a standard vector to this plot */
 static int
-addDataDesc(runDesc *run, char *name, int type, int ind)
+addDataDesc(runDesc *run, char *name, int type, int ind, int meminit)
 {
     dataDesc *data;
 
-    if (!run->numData)
-        run->data = TMALLOC(dataDesc, 1);
-    else
-        run->data = TREALLOC(dataDesc, run->data, run->numData + 1);
+    /* initialize memory (for all vectors or given by 'save') */
+    if (!run->numData) {
+        /* even if input 0, do a malloc */
+        run->data = TMALLOC(dataDesc, ++meminit);
+        run->maxData = meminit;
+    }
+    /* If there is need for more memory */
+    else if (run->numData == run->maxData) {
+        run->maxData = (int)(run->maxData * 1.1) + 1;
+        run->data = TREALLOC(dataDesc, run->data, run->maxData);
+    }
 
     data = &run->data[run->numData];
     /* so freeRun will get nice NULL pointers for the fields we don't set */
@@ -443,18 +457,24 @@ addDataDesc(runDesc *run, char *name, int type, int ind)
     return (OK);
 }
 
-
+/* Initialze memory for the list of all vectors in the current plot.
+   Add a special vector (e.g. @q1[ib]) to this plot */
 static int
-addSpecialDesc(runDesc *run, char *name, char *devname, char *param, int depind)
+addSpecialDesc(runDesc *run, char *name, char *devname, char *param, int depind, int meminit)
 {
     dataDesc *data;
     char *unique, *freeunique;       /* unique char * from back-end */
     int ret;
 
-    if (!run->numData)
-        run->data = TMALLOC(dataDesc, 1);
-    else
-        run->data = TREALLOC(dataDesc, run->data, run->numData + 1);
+    if (!run->numData) {
+        /* even if input 0, do a malloc */
+        run->data = TMALLOC(dataDesc, ++meminit);
+        run->maxData = meminit;
+    }
+    else if (run->numData == run->maxData) {
+        run->maxData = (int)(run->maxData * 1.1) + 1;
+        run->data = TREALLOC(dataDesc, run->data, run->maxData);
+    }
 
     data = &run->data[run->numData];
     /* so freeRun will get nice NULL pointers for the fields we don't set */
@@ -571,7 +591,7 @@ OUTpData(runDesc *plotPtr, IFvalue *refValue, IFvalue *valuePtr)
                     every quarter of a second, to give some feedback without using
                     too much CPU time  */
 #ifndef HAS_WINGUI
-                if (!orflag) {
+                if (!orflag && !ft_norefprint) {
                     currclock = clock();
                     if ((currclock-lastclock) > (0.25*CLOCKS_PER_SEC)) {
                         fprintf(stderr, " Reference value : % 12.5e\r",
@@ -586,7 +606,7 @@ OUTpData(runDesc *plotPtr, IFvalue *refValue, IFvalue *valuePtr)
 
                 fileAddRealValue(run->fp, run->binary, refValue->rValue);
 #ifndef HAS_WINGUI
-                if (!orflag) {
+                if (!orflag && !ft_norefprint) {
                     currclock = clock();
                     if ((currclock-lastclock) > (0.25*CLOCKS_PER_SEC)) {
                         fprintf(stderr, " Reference value : % 12.5e\r",
@@ -671,7 +691,7 @@ OUTpData(runDesc *plotPtr, IFvalue *refValue, IFvalue *valuePtr)
             variable just the same  */
 
 #ifndef HAS_WINGUI
-        if (!orflag) {
+        if (!orflag && !ft_norefprint) {
             currclock = clock();
             if ((currclock-lastclock) > (0.25*CLOCKS_PER_SEC)) {
                 if (run->isComplex) {
@@ -885,7 +905,7 @@ guess_type(const char *name)
         type = SV_TEMP;
     else if (cieq(name, "res-sweep"))
         type = SV_RES;
-    else if ((*name == '@') && substring("[g", name))
+    else if ((*name == '@') && substring("[g", name)) /* token starting with [g */
         type = SV_ADMITTANCE;
     else if ((*name == '@') && substring("[c", name))
         type = SV_CAPACITANCE;
@@ -893,6 +913,8 @@ guess_type(const char *name)
         type = SV_CURRENT;
     else if ((*name == '@') && substring("[q", name))
         type = SV_CHARGE;
+    else if ((*name == '@') && substring("[p]", name)) /* token is exactly [p] */
+        type = SV_POWER;
     else
         type = SV_VOLTAGE;
 
@@ -1060,36 +1082,39 @@ plotInit(runDesc *run)
     }
 }
 
-/* prepare the vector length data for memory allocation */
+/* prepare the vector length data for memory allocation
+   If new, and tran or pss, length is TSTOP / TSTEP plus some margin.
+   If allocated length is exceeded, check progress. When > 20% then extrapolate memory needed,
+   if less than 20% then just double the size.
+   If not tran or pss, return fixed value (1024) of memory to be added.
+   */
 static inline int
-vlength2delta(int l)
+vlength2delta(int len)
 {
 #ifdef SHARED_MODULE
     if (savenone)
         /* We need just a vector length of 1 */
         return 1;
 #endif
-    static int newpoints;
-    static int newpoints2;
+    /* TSTOP / TSTEP */
     int points = ft_curckt->ci_ckt->CKTtimeListSize;
     /* transient and pss analysis (points > 0) upon start */
-    if (l == 0 && points > 0) {
+    if (len == 0 && points > 0) {
         /* number of timesteps plus some overhead */
-        newpoints = points + 100;
-        return newpoints;
+        return points + 100;
     }
     /* transient and pss if original estimate is exceeded */
-    else if (l == newpoints && points > 0)
-    {
+    else if (points > 0) {
         /* check where we are */
         double timerel = ft_curckt->ci_ckt->CKTtime / ft_curckt->ci_ckt->CKTfinalTime;
-        /* return an estimate of the appropriate number of time points */
-        newpoints2 = (int)(points / timerel) - points + 1;
-        return newpoints2;
+        /* return an estimate of the appropriate number of time points, if more than 20% of
+           the anticipated total time has passed */
+        if (timerel > 0.2)
+            return (int)(len / timerel) - len + 1;
+        /* If not, just double the available memory */
+        else
+            return len;
     }
-    /* the estimate is (hopefully only slightly) too small, so add 2% of points */
-    else if (points > 0)
-        return (int)(newpoints2 / 50) + 1;
     /* other analysis types that do not set CKTtimeListSize */
     else
         return 1024;
@@ -1147,7 +1172,6 @@ plotAddComplexValue(dataDesc *desc, IFcomplex value)
 static void
 plotEnd(runDesc *run)
 {
-    fprintf(stderr, "\n");
     fprintf(stdout, "\nNo. of Data Rows : %d\n", run->pointCount);
 }
 
@@ -1414,7 +1438,7 @@ InterpFileAdd(runDesc *run, IFvalue *refValue, IFvalue *valuePtr)
             interpolatenow = FALSE;
         }
 #ifndef HAS_WINGUI
-        if (!orflag) {
+        if (!orflag && !ft_norefprint) {
             currclock = clock();
             if ((currclock-lastclock) > (0.25*CLOCKS_PER_SEC)) {
                 fprintf(stderr, " Reference value : % 12.5e\r",
@@ -1578,7 +1602,7 @@ InterpPlotAdd(runDesc *run, IFvalue *refValue, IFvalue *valuePtr)
 #endif
 
 #ifndef HAS_WINGUI
-    if (!orflag) {
+    if (!orflag && !ft_norefprint) {
         currclock = clock();
         if ((currclock-lastclock) > (0.25*CLOCKS_PER_SEC)) {
             fprintf(stderr, " Reference value : % 12.5e\r",

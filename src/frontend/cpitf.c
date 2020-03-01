@@ -4,6 +4,7 @@ Author: 1985 Wayne A. Christopher, U. C. Berkeley CAD Group
 ***********/
 
 #include "ngspice/ngspice.h"
+#include "ngspice/const.h"
 #include "ngspice/cpdefs.h"
 #include "ngspice/ftedefs.h"
 #include "ngspice/dvec.h"
@@ -23,6 +24,11 @@ Author: 1985 Wayne A. Christopher, U. C. Berkeley CAD Group
 /* Set some standard variables and aliases, etc, and init the ccom stuff.
    Called by fcn main() */
 
+/* Macros to expand a macro to its value and then quote that value */
+#undef stringit
+#undef stringit2
+#define stringit2(x) #x
+#define stringit(x) stringit2(x)
 void
 ft_cpinit(void)
 {
@@ -37,14 +43,14 @@ ft_cpinit(void)
         "TRUE",     "1",
         "no",       "0",
         "FALSE",    "0",
-        "pi",       "3.14159265358979323846",
-        "e",        "2.71828182845904523536",
-        "c",        "2.997925e8",
+        "pi",       stringit(CONSTpi),
+        "e",        stringit(CONSTnap),
+        "c",        stringit(CONSTc),
         "i",        "0,1",
-        "kelvin",   "-273.15",
-        "echarge",  "1.60219e-19",
-        "boltz",    "1.38062e-23",
-        "planck",   "6.62620e-34"
+        "kelvin",   stringit(CONSTKtoC_for_str),
+        "echarge",  stringit(CHARGE),
+        "boltz",    stringit(CONSTboltz),
+        "planck",   stringit(CONSTplanck)
     };
 
     static char *udfs[] = {
@@ -63,13 +69,13 @@ ft_cpinit(void)
         "vr(x)",    "re(v(x))",
         "vr(x,y)",  "re(v(x) - v(y))"
     };
-
+#ifndef SHARED_MODULE
     /* if TIOCSTI is defined (not available in MS Windows:
        Make escape the break character.
        So the user can type ahead...
        fcn defined in complete.c. */
     cp_ccon(TRUE);
-
+#endif
     /* Initialize io, cp_chars[], variable "history" in init.c. */
     cp_init();
 
@@ -389,23 +395,69 @@ cp_oddcomm(char *s, wordlist *wl)
     FILE *fp;
 
     if ((fp = inp_pathopen(s, "r")) != NULL) {
+        /* Buffer for building string, unless unusually long */
         char buf[BSIZE_SP];
-        wordlist *setarg;
+        char *p_buf_active; /* buffer in use */
+        static const char header[] = "argc = %d argv = ( ";
+
+        /* Bound on initial length: Header - 2 for %d - 1 for null +
+         * + 2 for closing ')' and '\0'  + bound on length of int
+         * as string */
+        size_t n_byte_data =
+                sizeof header / sizeof *header + 3 * sizeof(int) - 1;
+
         (void) fclose(fp);
-        (void) sprintf(buf, "argc = %d argv = ( ", wl_length(wl));
-        while (wl) {
-            (void) strcat(buf, wl->wl_word);
-            (void) strcat(buf, " ");
-            wl = wl->wl_next;
+
+        /* Step through word list finding length */
+        {
+            wordlist *wl1;
+            for (wl1 = wl; wl1 != (wordlist *) NULL; wl1 = wl1->wl_next) {
+                n_byte_data += strlen(wl1->wl_word) + 1;
+            }
         }
-        (void) strcat(buf, ")");
-        setarg = cp_lexer(buf);
+
+        /* Use fixed buffer unless it is too small */
+        if (n_byte_data <= sizeof buf / sizeof *buf) {
+            p_buf_active = buf;
+        }
+        else {
+            p_buf_active = TMALLOC(char, n_byte_data);
+        }
+
+        /* Step through word list again to build string */
+        {
+            char *p_dst = p_buf_active;
+            p_dst += sprintf(p_dst, header, wl_length(wl));
+            for ( ; wl != (wordlist *) NULL; wl = wl->wl_next) {
+                const char *p_src = wl->wl_word;
+                for ( ; ; p_src++) { /* copy source string */
+                    const char ch_src = *p_src;
+                    if (ch_src == '\0') {
+                        *p_dst++ = ' ';
+                        break;
+                    }
+                    *p_dst++ = ch_src;
+                } /* end of loop copying source string */
+            } /* end of loop over words in list */
+
+            /* Add ')' and terminate string */
+            *p_dst++ = ')';
+            *p_dst = '\0';
+        } /* end of block building string */
+
+        wordlist *setarg = cp_lexer(p_buf_active);
+
+        /* Free buffer allocation if made */
+        if (p_buf_active != buf) {
+            txfree(p_buf_active);
+        }
+
         com_set(setarg);
         wl_free(setarg);
         inp_source(s);
         cp_remvar("argc");
         cp_remvar("argv");
-        return (TRUE);
+        return TRUE;
     }
 
     if (wl && eq(wl->wl_word, "=")) {
@@ -416,4 +468,7 @@ cp_oddcomm(char *s, wordlist *wl)
     }
 
     return (FALSE);
-}
+} /* end of function cp_oddcomm */
+
+
+

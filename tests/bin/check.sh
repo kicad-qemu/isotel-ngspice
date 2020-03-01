@@ -39,9 +39,9 @@ case $HOST_TYPE in
       fi
       rm -f $testname.test_tmp $testname.out_tmp
       ;;
-    SunOS*|OpenBSD*)
-      $SPICE --batch $testdir/$testname.cir >$testname.test &&\
-      sed -e '/^$/d' $testname.test | egrep -v "$FILTER" > $testname.test_tmp &&\
+    FreeBSD*|SunOS*|OpenBSD*)
+      $SPICE --batch $testdir/$testname.cir >$testname.test
+      sed -e '/^$/d' $testname.test | egrep -v "$FILTER" > $testname.test_tmp
       sed -e '/^$/d' $testdir/$testname.out | egrep -v "$FILTER" > $testname.out_tmp
       if diff -b -w $testname.out_tmp $testname.test_tmp; then
           rm $testname.test $testname.test_tmp $testname.out_tmp

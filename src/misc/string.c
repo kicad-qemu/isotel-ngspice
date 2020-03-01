@@ -75,22 +75,34 @@ tvprintf(const char *fmt, va_list args)
 
         if (nchars == -1) {     // compatibility to old implementations
             size *= 2;
-        } else if (size < nchars + 1) {
-            size = nchars + 1;
-        } else {
+        }
+        else if (nchars >= size) {
+            /* Output was truncated. Returned value is the number of chars
+             * that would have been written if the buffer were large enough
+             * excluding the terminiating null. */
+            size = nchars + 1; /* min required allocation size */
+        }
+        else { /* String formatted OK */
             break;
         }
 
+        /* Allocate a larger buffer */
         if (p == buf)
             p = TMALLOC(char, size);
         else
             p = TREALLOC(char, p, size);
     }
 
+    /* Return the formatted string, making a copy on the heap if the
+     * stack's buffer (buf) contains the string */
     return (p == buf) ? copy(p) : p;
-}
+} /* end of function tvprintf */
 
 
+
+/* This function returns an allocation containing the string formatted
+ * according to fmt and the variadic argument list provided. It is a wrapper
+ * around tvprintf() which processes the argumens as a va_list. */
 char *
 tprintf(const char *fmt, ...)
 {
@@ -102,7 +114,7 @@ tprintf(const char *fmt, ...)
     va_end(ap);
 
     return rv;
-}
+} /* end of function tprintf */
 
 
 /* Determine whether sub is a substring of str. */
@@ -263,7 +275,6 @@ cimatch(char *p, char *s)
  * since I didn't want to break any fcns which called it from elsewhere than
  * subckt.c.  -- SDB 12.3.2003.
  *-------------------------------------------------------------------------*/
-
 char *
 gettok(char **s)
 {
@@ -308,6 +319,8 @@ gettok(char **s)
 char *
 nexttok(const char *s)
 {
+    if (!s)
+        return NULL;
     int paren = 0;
 
     s = skip_ws(s);
@@ -338,44 +351,63 @@ nexttok(const char *s)
 char *
 gettok_iv(char **s)
 {
-    char c;
-    int paren;
-    char *token;             /* return token */
-    SPICE_DSTRING buf;       /* allow any length string */
+    char *p_src = *s; /* location in source string */
+    char c; /* current char */
 
-    paren = 0;
-    while (isspace_c(**s) || (**s == '='))
-        (*s)++;
+    /* Step past whitespace and '=' */
+    while (isspace_c(c = *p_src) || (c == '=')) {
+        p_src++;
+    }
 
-    if ((!**s) || ((**s != 'v') && (**s != 'i') && (**s != 'V') && (**s != 'I')))
-        return NULL;
+    /* Test for valid leading character */
+    if (((c =*p_src) == '\0') ||
+            ((c != 'v') && (c != 'i') && (c != 'V') && (c != 'I'))) {
+        *s = p_src; /* update position in string */
+        return (char *) NULL;
+    }
 
-    // initialize string
-    spice_dstring_init(&buf);
+    /* Allocate buffer for token being returned */
+    char * const token = TMALLOC(char, strlen(p_src) + 1);
+    char *p_dst = token; /* location in token */
+
     // add v or i to buf
-    spice_dstring_append_char(&buf, *(*s)++);
+    *p_dst++ = *p_src++;
 
-    while ((c = **s) != '\0') {
-        if (c == '(')
-            paren += 1;
-        else if (c == ')')
-            paren -= 1;
-        if (isspace_c(c))
-            (*s)++;
-        else {
-            spice_dstring_append_char(&buf, *(*s)++);
-            if (paren == 0)
-                break;
+    {
+        int n_paren = 0;
+        /* Skip any space between v/V/i/I and '(' */
+        p_src = skip_ws(p_src);
+
+        while ((c = *p_src) != '\0') {
+            /* Keep track of nesting level */
+            if (c == '(') {
+                n_paren++;
+            }
+            else if (c == ')') {
+                n_paren--;
+            }
+
+            if (isspace_c(c)) { /* Do not copy whitespace to output */
+                p_src++;
+            }
+            else {
+                *p_dst++ = *p_src++;
+                if (n_paren == 0) {
+                    break;
+                }
+            }
         }
     }
 
-    while (isspace_c(**s) || **s == ',')
-        (*s)++;
+    /* Step past whitespace and ',' */
+    while (isspace_c(c = *p_src) || (c == ',')) {
+        p_src++;
+    }
 
-    token = copy(spice_dstring_value(&buf));
-    spice_dstring_free(&buf);
+    *s = p_src; /* update position in string */
     return token;
-}
+} /* end of function gettok_iv */
+
 
 
 /*-------------------------------------------------------------------------*
@@ -412,6 +444,43 @@ gettok_noparens(char **s)
 
     return copy_substring(token, token_e);
 }
+
+/*-------------------------------------------------------------------------*
+* gettok_model acts like gettok_noparens, however when it encounters a '{', 
+* it searches for the corresponding '}' and adds the string to the output
+* token.
+*-------------------------------------------------------------------------*/
+char *
+gettok_model(char **s)
+{
+    char c;
+    const char *token, *token_e;
+
+    *s = skip_ws(*s);
+
+    if (!**s)
+        return NULL;  /* return NULL if we come to end of line */
+
+    token = *s;
+    while ((c = **s) != '\0' &&
+        !isspace_c(c) &&
+        (**s != '(') &&
+        (**s != ')') &&
+        (**s != ',')
+        ) {
+        (*s)++;
+        if (**s == '{') {
+            char *tmpstr = gettok_char(s, '}', FALSE, TRUE);
+            tfree(tmpstr);
+        }
+    }
+    token_e = *s;
+
+    *s = skip_ws(*s);
+
+    return copy_substring(token, token_e);
+}
+
 
 
 char *
@@ -601,36 +670,55 @@ get_r_paren(char **s)
 
 /*-------------------------------------------------------------------------*
  * this function strips all white space inside parens
- * is needed in gettoks (dotcards.c) for right processing of expressions
- * like ".plot v( 5,4) v(6)"
+ * is needed in gettoks (dotcards.c) for correct processing of expressions
+ * like "    .plot v(   5  , 4  ) v( 6 )" -> .plot v(5,4) v(6)"
  *-------------------------------------------------------------------------*/
-
 char *
-stripWhiteSpacesInsideParens(char *str)
+stripWhiteSpacesInsideParens(const char *str)
 {
-    char *token;                               /* return token */
-    SPICE_DSTRING buf;                         /* allow any length string */
-    int i = 0;                                 /* index into string */
+    str = skip_ws(str); /* Skip leading whitespace */
+    const size_t n_char_str = strlen(str);
 
-    while ((str[i] == ' ') || (str[i] == '\t'))
-        i++;
+    /* Allocate buffer for string being built */
+    char * const str_out = TMALLOC(char, n_char_str + 1);
+    char *p_dst = str_out; /* location in str_out */
+    char ch; /* current char */
 
-    spice_dstring_init(&buf);
-    for (; str[i]; i++)
-        if (str[i] != '(') {
-            spice_dstring_append_char(&buf, str[i]);
-        } else {
-            spice_dstring_append_char(&buf, str[i]);
-            while (str[i++] != ')')
-                if (str[i] != ' ')
-                    spice_dstring_append_char(&buf, str[i]);
-            i--;
+    /* Process input string until its end */
+    for ( ; ; ) {
+        /* Add char. If at end of input string, return the string
+         * that was built */
+        if ((*p_dst++ = (ch = *str++)) == '\0') {
+            return str_out;
         }
 
-    token = copy(spice_dstring_value(&buf));
-    spice_dstring_free(&buf);
-    return token;
-}
+        /* If the char is a ')' add all non-whitespace until ')' or,
+         * if the string is malformed, until '\0' */
+        if (ch == '(') {
+            for ( ; ; ) {
+                /* If at end of input string, the closing ') was missing.
+                 * The caller will need to resolve this issue. */
+                if ((ch = *str++) == '\0') {
+                    *p_dst = '\0';
+                    return str_out;
+                }
+
+                if (isspace((int) ch)) { /* skip whitespace */
+                    continue;
+                }
+
+                /* Not whitespace, so add next character */
+                *p_dst++ = ch;
+
+                /* If the char that was added was ')', done */
+                if (ch == ')') {
+                    break;
+                }
+            } /* end of loop processing () */
+        } /* end of case of '(' found */
+    } /* end of loop over chars in input string */
+} /* end of function stripWhiteSpacesInsideParens */
+
 
 
 bool
@@ -712,3 +800,6 @@ model_name_match(const char *token, const char *model_name)
 
     return 2;
 }
+
+
+

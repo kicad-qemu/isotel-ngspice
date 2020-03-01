@@ -669,7 +669,9 @@ inp_spsource(FILE *fp, bool comfile, char *filename, bool intfile)
                 /* lines .width, .four, .plot, .print, .save added to wl_first, removed from deck */
                 /* lines .op, .meas, .tf added to wl_first */
                 inp_casefix(s); /* s: first token from line */
-                inp_casefix(dd->line);
+                /* Do not eliminate " around netnames, to allow '/' or '-' in netnames */
+                if (!eq(s, ".plot") && !eq(s, ".print"))
+                    inp_casefix(dd->line);
                 if (eq(s, ".width") ||
                     ciprefix(".four", s) ||
                     eq(s, ".plot") ||
@@ -945,7 +947,7 @@ inp_spsource(FILE *fp, bool comfile, char *filename, bool intfile)
         /* in shared ngspice controls a execute in the primary thread, typically
            before the background thread has finished. This leads to premature execution
            of commands. Thus this is delegated to a function using a third thread, that
-           only start when the background threas has finished (sharedspice.c).*/
+           only starts when the background thread has finished (sharedspice.c).*/
 #ifdef SHARED_MODULE
         for (wl = controls; wl; wl = wl->wl_next)
             if (cp_getvar("controlswait", CP_BOOL, NULL, 0)) {

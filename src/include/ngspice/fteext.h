@@ -140,6 +140,7 @@ extern void com_inventory(wordlist *wl);
 extern bool ft_acctprint;
 extern bool ft_noacctprint;
 extern bool ft_noinitprint;
+extern bool ft_norefprint;
 extern bool ft_listprint;
 extern bool ft_nopage;
 extern bool ft_nomod;
@@ -267,7 +268,8 @@ extern bool ft_stricterror;
 extern struct func ft_funcs[];
 extern struct func func_not;
 extern struct func func_uminus;
-extern struct pnode *ft_getpnames(wordlist *wl, bool check);
+extern struct pnode *ft_getpnames(const wordlist *wl, bool check);
+struct pnode *ft_getpnames_from_string(const char *sz, bool check);
 extern struct pnode *alloc_pnode(void);
 #define free_pnode(ptr)                         \
     do {                                        \
@@ -356,8 +358,9 @@ extern void vec_gc(void);
 extern void ft_loadfile(char *file);
 extern void vec_new(struct dvec *d);
 extern void plot_docoms(wordlist *wl);
-extern void vec_remove(char *name);
+extern void vec_remove(const char *name);
 extern void plot_setcur(char *name);
+extern struct plot *get_plot(char* name);
 extern void plot_new(struct plot *pl);
 extern char *vec_basename(struct dvec *v);
 extern bool plot_prefix(char *pre, char *str);

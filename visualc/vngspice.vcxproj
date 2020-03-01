@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" ToolsVersion="14.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="Debug|Win32">
@@ -168,9 +168,11 @@
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <LinkIncremental>false</LinkIncremental>
     <GenerateManifest>false</GenerateManifest>
+    <EmbedManifest>true</EmbedManifest>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <LinkIncremental>false</LinkIncremental>
+    <EmbedManifest>true</EmbedManifest>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='console_debug|Win32'">
     <LinkIncremental>false</LinkIncremental>
@@ -182,21 +184,25 @@
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='console_debug|x64'">
     <LinkIncremental>false</LinkIncremental>
     <GenerateManifest>false</GenerateManifest>
+    <EmbedManifest>true</EmbedManifest>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='console_release|x64'">
     <LinkIncremental>false</LinkIncremental>
+    <EmbedManifest>true</EmbedManifest>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='ReleaseOMP|Win32'">
     <LinkIncremental>false</LinkIncremental>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='ReleaseOMP|x64'">
     <LinkIncremental>false</LinkIncremental>
+    <EmbedManifest>true</EmbedManifest>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='console_release_omp|Win32'">
     <LinkIncremental>false</LinkIncremental>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='console_release_omp|x64'">
     <LinkIncremental>false</LinkIncremental>
+    <EmbedManifest>true</EmbedManifest>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <PreBuildEvent>
@@ -206,7 +212,7 @@
     <ClCompile>
       <Optimization>Disabled</Optimization>
       <AdditionalIncludeDirectories>..\src\maths\poly;..\src\frontend;..\src\spicelib\devices;tmp-bison;src\include;..\src\include;..\src\spicelib\parser;.;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>_CRT_SECURE_NO_DEPRECATE;SIMULATOR;XSPICE;NGDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>_CRT_SECURE_NO_DEPRECATE;SIMULATOR;XSPICE;_MSC_PLATFORM_TOOLSET=$(PlatformToolsetVersion);NGDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <MinimalRebuild>false</MinimalRebuild>
       <ExceptionHandling>
       </ExceptionHandling>
@@ -237,6 +243,9 @@
     <PostBuildEvent>
       <Command>make-install-vngspiced.bat $(OutDir)</Command>
     </PostBuildEvent>
+    <Manifest>
+      <AdditionalManifestFiles>$(ProjectDir)ngspice-x86.exe.manifest</AdditionalManifestFiles>
+    </Manifest>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <PreBuildEvent>
@@ -249,7 +258,7 @@
       <FavorSizeOrSpeed>Speed</FavorSizeOrSpeed>
       <WholeProgramOptimization>true</WholeProgramOptimization>
       <AdditionalIncludeDirectories>..\src\maths\poly;..\src\frontend;..\src\spicelib\devices;tmp-bison;src\include;..\src\include;..\src\spicelib\parser;.;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>_CRT_SECURE_NO_DEPRECATE;SIMULATOR;XSPICE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>_CRT_SECURE_NO_DEPRECATE;SIMULATOR;XSPICE;_MSC_PLATFORM_TOOLSET=$(PlatformToolsetVersion);%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <MinimalRebuild>false</MinimalRebuild>
       <ExceptionHandling>
       </ExceptionHandling>
@@ -285,6 +294,9 @@
       make-install-vngspice.bat $(OutDir)
       </Command>
     </PostBuildEvent>
+    <Manifest>
+      <AdditionalManifestFiles>$(ProjectDir)ngspice-x86.exe.manifest</AdditionalManifestFiles>
+    </Manifest>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <PreBuildEvent>
@@ -297,7 +309,7 @@
     <ClCompile>
       <Optimization>Disabled</Optimization>
       <AdditionalIncludeDirectories>..\src\maths\poly;..\src\frontend;..\src\spicelib\devices;tmp-bison;src\include;..\src\include;..\src\spicelib\parser;.;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>_CRT_SECURE_NO_DEPRECATE;SIMULATOR;XSPICE;NGDEBUG;CONFIG64;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>_CRT_SECURE_NO_DEPRECATE;SIMULATOR;XSPICE;_MSC_PLATFORM_TOOLSET=$(PlatformToolsetVersion);NGDEBUG;CONFIG64;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <MinimalRebuild>false</MinimalRebuild>
       <ExceptionHandling>
       </ExceptionHandling>
@@ -330,6 +342,9 @@
       make-install-vngspiced.bat $(OutDir) 64
       </Command>
     </PostBuildEvent>
+    <Manifest>
+      <AdditionalManifestFiles>$(ProjectDir)ngspice.exe.manifest %(AdditionalManifestFiles)</AdditionalManifestFiles>
+    </Manifest>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <PreBuildEvent>
@@ -345,7 +360,7 @@
       <FavorSizeOrSpeed>Speed</FavorSizeOrSpeed>
       <WholeProgramOptimization>true</WholeProgramOptimization>
       <AdditionalIncludeDirectories>..\src\maths\poly;..\src\frontend;..\src\spicelib\devices;tmp-bison;src\include;..\src\include;..\src\spicelib\parser;.;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>_CRT_SECURE_NO_DEPRECATE;SIMULATOR;XSPICE;CONFIG64;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>_CRT_SECURE_NO_DEPRECATE;SIMULATOR;XSPICE;_MSC_PLATFORM_TOOLSET=$(PlatformToolsetVersion);CONFIG64;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <MinimalRebuild>false</MinimalRebuild>
       <ExceptionHandling>
       </ExceptionHandling>
@@ -383,6 +398,9 @@
       make-install-vngspice.bat $(OutDir) 64
       </Command>
     </PostBuildEvent>
+    <Manifest>
+      <AdditionalManifestFiles>$(ProjectDir)ngspice.exe.manifest %(AdditionalManifestFiles)</AdditionalManifestFiles>
+    </Manifest>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='console_debug|Win32'">
     <PreBuildEvent>
@@ -392,7 +410,7 @@
     <ClCompile>
       <Optimization>Disabled</Optimization>
       <AdditionalIncludeDirectories>..\src\maths\poly;..\src\frontend;..\src\spicelib\devices;tmp-bison;src\include;..\src\include;..\src\spicelib\parser;.;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>_CRT_SECURE_NO_DEPRECATE;SIMULATOR;XSPICE;NGDEBUG;CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>_CRT_SECURE_NO_DEPRECATE;SIMULATOR;XSPICE;_MSC_PLATFORM_TOOLSET=$(PlatformToolsetVersion);NGDEBUG;CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <MinimalRebuild>false</MinimalRebuild>
       <ExceptionHandling>
       </ExceptionHandling>
@@ -423,6 +441,9 @@
     <PostBuildEvent>
       <Command>make-install-vngspiced.bat $(OutDir)</Command>
     </PostBuildEvent>
+    <Manifest>
+      <AdditionalManifestFiles>$(ProjectDir)ngspice-x86.exe.manifest</AdditionalManifestFiles>
+    </Manifest>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='console_release|Win32'">
     <PreBuildEvent>
@@ -435,7 +456,7 @@
       <FavorSizeOrSpeed>Speed</FavorSizeOrSpeed>
       <WholeProgramOptimization>true</WholeProgramOptimization>
       <AdditionalIncludeDirectories>..\src\maths\poly;..\src\frontend;..\src\spicelib\devices;tmp-bison;src\include;..\src\include;..\src\spicelib\parser;.;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>_CRT_SECURE_NO_DEPRECATE;SIMULATOR;XSPICE;CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>_CRT_SECURE_NO_DEPRECATE;SIMULATOR;XSPICE;_MSC_PLATFORM_TOOLSET=$(PlatformToolsetVersion);CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <MinimalRebuild>false</MinimalRebuild>
       <ExceptionHandling>
       </ExceptionHandling>
@@ -469,6 +490,9 @@
     <PostBuildEvent>
       <Command>make-install-vngspice.bat $(OutDir)</Command>
     </PostBuildEvent>
+    <Manifest>
+      <AdditionalManifestFiles>$(ProjectDir)ngspice-x86.exe.manifest</AdditionalManifestFiles>
+    </Manifest>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='console_debug|x64'">
     <PreBuildEvent>
@@ -481,7 +505,7 @@
     <ClCompile>
       <Optimization>Disabled</Optimization>
       <AdditionalIncludeDirectories>..\src\maths\poly;..\src\frontend;..\src\spicelib\devices;tmp-bison;src\include;..\src\include;..\src\spicelib\parser;.;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>_CRT_SECURE_NO_DEPRECATE;SIMULATOR;XSPICE;NGDEBUG;CONSOLE;CONFIG64;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>_CRT_SECURE_NO_DEPRECATE;SIMULATOR;XSPICE;_MSC_PLATFORM_TOOLSET=$(PlatformToolsetVersion);NGDEBUG;CONSOLE;CONFIG64;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <MinimalRebuild>false</MinimalRebuild>
       <ExceptionHandling>
       </ExceptionHandling>
@@ -514,6 +538,9 @@
       make-install-vngspiced.bat $(OutDir) 64
       </Command>
     </PostBuildEvent>
+    <Manifest>
+      <AdditionalManifestFiles>$(ProjectDir)ngspice.exe.manifest %(AdditionalManifestFiles)</AdditionalManifestFiles>
+    </Manifest>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='console_release|x64'">
     <PreBuildEvent>
@@ -529,7 +556,7 @@
       <FavorSizeOrSpeed>Speed</FavorSizeOrSpeed>
       <WholeProgramOptimization>true</WholeProgramOptimization>
       <AdditionalIncludeDirectories>..\src\maths\poly;..\src\frontend;..\src\spicelib\devices;tmp-bison;src\include;..\src\include;..\src\spicelib\parser;.;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>_CRT_SECURE_NO_DEPRECATE;SIMULATOR;XSPICE;CONSOLE;CONFIG64;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>_CRT_SECURE_NO_DEPRECATE;SIMULATOR;XSPICE;_MSC_PLATFORM_TOOLSET=$(PlatformToolsetVersion);CONSOLE;CONFIG64;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <MinimalRebuild>false</MinimalRebuild>
       <ExceptionHandling>
       </ExceptionHandling>
@@ -565,6 +592,9 @@
       make-install-vngspice.bat $(OutDir) 64
       </Command>
     </PostBuildEvent>
+    <Manifest>
+      <AdditionalManifestFiles>$(ProjectDir)ngspice.exe.manifest %(AdditionalManifestFiles)</AdditionalManifestFiles>
+    </Manifest>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='ReleaseOMP|Win32'">
     <PreBuildEvent>
@@ -577,7 +607,7 @@
       <FavorSizeOrSpeed>Speed</FavorSizeOrSpeed>
       <WholeProgramOptimization>true</WholeProgramOptimization>
       <AdditionalIncludeDirectories>..\src\maths\poly;..\src\frontend;..\src\spicelib\devices;tmp-bison;src\include;..\src\include;..\src\spicelib\parser;.;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>_CRT_SECURE_NO_DEPRECATE;SIMULATOR;XSPICE;USE_OMP;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>_CRT_SECURE_NO_DEPRECATE;SIMULATOR;XSPICE;_MSC_PLATFORM_TOOLSET=$(PlatformToolsetVersion);USE_OMP;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <MinimalRebuild>false</MinimalRebuild>
       <ExceptionHandling>
       </ExceptionHandling>
@@ -612,6 +642,9 @@
     <PostBuildEvent>
       <Command>make-install-vngspice.bat $(OutDir)</Command>
     </PostBuildEvent>
+    <Manifest>
+      <AdditionalManifestFiles>$(ProjectDir)ngspice-x86.exe.manifest</AdditionalManifestFiles>
+    </Manifest>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='ReleaseOMP|x64'">
     <PreBuildEvent>
@@ -627,7 +660,7 @@
       <FavorSizeOrSpeed>Speed</FavorSizeOrSpeed>
       <WholeProgramOptimization>true</WholeProgramOptimization>
       <AdditionalIncludeDirectories>..\src\maths\poly;..\src\frontend;..\src\spicelib\devices;tmp-bison;src\include;..\src\include;..\src\spicelib\parser;.;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>_CRT_SECURE_NO_DEPRECATE;SIMULATOR;XSPICE;USE_OMP;CONFIG64;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>_CRT_SECURE_NO_DEPRECATE;SIMULATOR;XSPICE;_MSC_PLATFORM_TOOLSET=$(PlatformToolsetVersion);USE_OMP;CONFIG64;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <MinimalRebuild>false</MinimalRebuild>
       <ExceptionHandling>
       </ExceptionHandling>
@@ -666,6 +699,9 @@
       make-install-vngspice.bat $(OutDir) 64
       </Command>
     </PostBuildEvent>
+    <Manifest>
+      <AdditionalManifestFiles>$(ProjectDir)ngspice.exe.manifest %(AdditionalManifestFiles)</AdditionalManifestFiles>
+    </Manifest>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='console_release_omp|Win32'">
     <PreBuildEvent>
@@ -678,7 +714,7 @@
       <FavorSizeOrSpeed>Speed</FavorSizeOrSpeed>
       <WholeProgramOptimization>true</WholeProgramOptimization>
       <AdditionalIncludeDirectories>..\src\maths\poly;..\src\frontend;..\src\spicelib\devices;tmp-bison;src\include;..\src\include;..\src\spicelib\parser;.;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>_CRT_SECURE_NO_DEPRECATE;SIMULATOR;XSPICE;CONSOLE;USE_OMP;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>_CRT_SECURE_NO_DEPRECATE;SIMULATOR;XSPICE;_MSC_PLATFORM_TOOLSET=$(PlatformToolsetVersion);CONSOLE;USE_OMP;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <MinimalRebuild>false</MinimalRebuild>
       <ExceptionHandling>
       </ExceptionHandling>
@@ -713,6 +749,9 @@
     <PostBuildEvent>
       <Command>make-install-vngspice.bat $(OutDir)</Command>
     </PostBuildEvent>
+    <Manifest>
+      <AdditionalManifestFiles>$(ProjectDir)ngspice-x86.exe.manifest</AdditionalManifestFiles>
+    </Manifest>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='console_release_omp|x64'">
     <PreBuildEvent>
@@ -728,7 +767,7 @@
       <FavorSizeOrSpeed>Speed</FavorSizeOrSpeed>
       <WholeProgramOptimization>true</WholeProgramOptimization>
       <AdditionalIncludeDirectories>..\src\maths\poly;..\src\frontend;..\src\spicelib\devices;tmp-bison;src\include;..\src\include;..\src\spicelib\parser;.;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>_CRT_SECURE_NO_DEPRECATE;SIMULATOR;XSPICE;CONSOLE;CONFIG64;USE_OMP;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>_CRT_SECURE_NO_DEPRECATE;SIMULATOR;XSPICE;_MSC_PLATFORM_TOOLSET=$(PlatformToolsetVersion);CONSOLE;CONFIG64;USE_OMP;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <MinimalRebuild>false</MinimalRebuild>
       <ExceptionHandling>
       </ExceptionHandling>
@@ -765,6 +804,9 @@
       make-install-vngspice.bat $(OutDir) 64
       </Command>
     </PostBuildEvent>
+    <Manifest>
+      <AdditionalManifestFiles>$(ProjectDir)ngspice.exe.manifest %(AdditionalManifestFiles)</AdditionalManifestFiles>
+    </Manifest>
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClInclude Include="..\src\ciderlib\oned\oneddefs.h" />
@@ -883,6 +925,7 @@
     <ClInclude Include="..\src\frontend\wdisp\windisp.h" />
     <ClInclude Include="..\src\frontend\wdisp\winprint.h" />
     <ClInclude Include="..\src\frontend\where.h" />
+    <ClInclude Include="..\src\hist_info.h" />
     <ClInclude Include="..\src\include\ngspice\1-f-code.h" />
     <ClInclude Include="..\src\include\ngspice\acdefs.h" />
     <ClInclude Include="..\src\include\ngspice\bdrydefs.h" />
@@ -1415,6 +1458,9 @@
     <ClCompile Include="..\src\frontend\fourier.c" />
     <ClCompile Include="..\src\frontend\ftesopt.c" />
     <ClCompile Include="..\src\frontend\gens.c" />
+    <ClCompile Include="..\src\frontend\get_phys_mem_size.c" />
+    <ClCompile Include="..\src\frontend\get_resident_set_size.c" />
+    <ClCompile Include="..\src\frontend\get_avail_mem_size.c" />
     <ClCompile Include="..\src\frontend\hcomp.c" />
     <ClCompile Include="..\src\frontend\help\help.c" />
     <ClCompile Include="..\src\frontend\help\provide.c" />
@@ -1488,6 +1534,7 @@
     <ClCompile Include="..\src\frontend\wdisp\windisp.c" />
     <ClCompile Include="..\src\frontend\wdisp\winprint.c" />
     <ClCompile Include="..\src\frontend\where.c" />
+    <ClCompile Include="..\src\hist_info.c" />
     <ClCompile Include="..\src\main.c" />
     <ClCompile Include="..\src\maths\cmaths\cmath1.c" />
     <ClCompile Include="..\src\maths\cmaths\cmath2.c" />
@@ -2458,7 +2505,6 @@
     <ClCompile Include="..\src\spicelib\devices\vbic\vbicacld.c" />
     <ClCompile Include="..\src\spicelib\devices\vbic\vbicask.c" />
     <ClCompile Include="..\src\spicelib\devices\vbic\vbicconv.c" />
-    <ClCompile Include="..\src\spicelib\devices\vbic\vbicdel.c" />
     <ClCompile Include="..\src\spicelib\devices\vbic\vbicgetic.c" />
     <ClCompile Include="..\src\spicelib\devices\vbic\vbicinit.c" />
     <ClCompile Include="..\src\spicelib\devices\vbic\vbicload.c" />

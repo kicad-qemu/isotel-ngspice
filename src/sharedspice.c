@@ -1,4 +1,4 @@
-/* Copyright 2013 - 2018 Holger Vogt
+/* Copyright 2013 - 2019 Holger Vogt
  *
  * Modified BSD license
  */
@@ -10,7 +10,7 @@
 /*******************/
 
 #ifdef _MSC_VER
-#define SHAREDSPICE_version "30.0"
+#define SHAREDSPICE_version "31.0"
 #define STDIN_FILENO    0
 #define STDOUT_FILENO   1
 #define STDERR_FILENO   2
@@ -330,8 +330,10 @@ _cthread_run(void *controls)
     if (!cont_condition)
         printf("Prepared to start controls after bg_run has finished\n");
     pthread_mutex_lock(&triggerMutex);
-    while (!cont_condition)
+    cont_condition = FALSE;
+    do {
         pthread_cond_wait(&cond, &triggerMutex);
+    } while (!cont_condition);
     pthread_mutex_unlock(&triggerMutex);
 #endif
     fl_exited = FALSE;
@@ -344,7 +346,8 @@ _cthread_run(void *controls)
     return NULL;
 }
 
-/* starts a background thread, e.g. from command bg_run */
+/* starts a background thread, e.g. from command bg_run,
+   releases controls thread tid2  */
 static void * EXPORT_FLAVOR
 _thread_run(void *string)
 {
@@ -366,15 +369,21 @@ _thread_run(void *string)
     /* notify caller that thread has exited */
     if (!nobgtrwanted)
         bgtr(fl_exited, ng_ident, userptr);
+    /* release thread tid2 */
+    if (tid2) {
 #ifdef HAVE_LIBPTHREAD
-    cont_condition = TRUE;
-    pthread_cond_signal(&cond);
+        pthread_mutex_lock(&triggerMutex);
+        cont_condition = TRUE;
+        pthread_cond_signal(&cond);
+        pthread_mutex_unlock(&triggerMutex);
+        pthread_join(tid2, NULL);
 #elif defined _MSC_VER || defined __MINGW32__
-    ResumeThread(tid2);
+        ResumeThread(tid2);
 #else
 
 #endif
-
+        tid2 = 0;
+    }
     return NULL;
 }
 
@@ -433,17 +442,19 @@ sighandler_sharedspice(int num)
 void
 exec_controls(wordlist *newcontrols)
 {
-    if (newcontrols) {
-        if (shcontrols)
-            wl_free(shcontrols);
+    if (newcontrols && newcontrols->wl_word && !eq(newcontrols->wl_word,"")) {
         shcontrols = newcontrols;
     }
+    else {
+        tid2 = 0;
+        return;
+    }
+
 #ifdef THREADS
 #ifdef HAVE_LIBPTHREAD
     cont_condition = FALSE;
     usleep(20000); /* wait a little */
     pthread_create(&tid2, NULL, (void * (*)(void *))_cthread_run, (void *)shcontrols);
-    pthread_detach(tid2);  /* automatically release the memory after thread has finished */
 #elif defined _MSC_VER || defined __MINGW32__
     tid2 = (HANDLE)_beginthreadex(NULL, 0, (unsigned int(__stdcall *)(void *))_cthread_run,
         (void*)shcontrols, CREATE_SUSPENDED, NULL);
@@ -898,6 +909,16 @@ immediately */
 IMPEXP
 int  ngSpice_Command(char* comexec)
 {
+    /* Check if command is reasonable */
+    if (comexec == NULL) {
+        fprintf(stderr, "Warning: Received command NULL, ignored");
+        return 1;
+    }
+    if (*comexec == '\0') {
+        fprintf(stderr, "Warning: Received empty string as command, ignored");
+        return 1;
+    }
+
     if ( ! setjmp(errbufc) ) {
 
         immediate = FALSE;
@@ -1860,6 +1881,9 @@ int sh_ExecutePerLoop(void)
 
     /* get the data of the last entry to the plot vector */
     veclen = pl->pl_dvecs->v_length - 1;
+    /* safeguard against vectors with 0 length (e.g. @c1[i] during ac simulation) */
+    if (veclen < 1)
+        return 2;
     curvecvalsall->vecindex = veclen;
     for (d = pl->pl_dvecs, i = 0; d; d = d->v_next, i++) {
         /* test if real */
