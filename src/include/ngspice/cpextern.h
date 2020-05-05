@@ -57,6 +57,7 @@ extern FILE *cp_curin;
 extern FILE *cp_curout;
 extern FILE *cp_curerr;
 extern bool cp_debug;
+extern bool cp_no_histsubst; /* controlled by "no_histsubst" true/false */
 extern char cp_amp;
 extern char cp_gt;
 extern char cp_lt;
@@ -71,15 +72,14 @@ extern bool cp_dounixcom;
 extern char *cp_csep;
 extern char * get_alt_prompt(void);
 extern int cp_evloop(char *string);
-extern void cp_resetcontrol(void);
+extern void cp_resetcontrol(bool warn);
 extern void cp_toplevel(void);
 extern void cp_popcontrol(void);
 extern void cp_pushcontrol(void);
 
 /* glob.c */
 
-extern bool cp_globmatch(char *p, char *s);
-extern char *cp_tildexpand(char *string);
+extern char *cp_tildexpand(const char *string);
 extern char cp_cbrac;
 extern char cp_ccurl;
 extern char cp_comma;
@@ -134,11 +134,6 @@ extern void out_send(char *string);
 /* quote.c */
 
 extern char *cp_unquote(const char *string);
-extern void cp_quoteword(char *str);
-extern void cp_striplist(wordlist *wlist);
-extern void cp_wstrip(char *str);
-
-
 
 /* unixcom.c */
 
@@ -162,7 +157,7 @@ extern bool cp_noglob;
 extern bool cp_nonomatch;
 extern char cp_dol;
 extern void cp_remvar(char *varname);
-extern void cp_vset(char *varname, enum cp_types type, void *value);
+void cp_vset(const char *varname, enum cp_types type, const void *value);
 extern struct variable *cp_setparse(wordlist *wl);
 extern wordlist *vareval(char *string);
 extern char *span_var_expr(char *t);
@@ -180,7 +175,7 @@ extern void cp_periodic(void);
 extern void ft_cpinit(void);
 extern struct comm *cp_coms;
 extern char *cp_program;
-extern struct variable *cp_enqvar(char *word, int *tbfreed);
+extern struct variable *cp_enqvar(const char *word, int *tbfreed);
 extern struct variable *cp_usrvars(void);
 int cp_usrset(struct variable *var, bool isset);
 extern void fatal(void);

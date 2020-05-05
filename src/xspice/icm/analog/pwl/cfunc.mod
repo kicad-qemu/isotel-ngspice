@@ -224,6 +224,25 @@ NON-STANDARD FEATURES
 
 ==============================================================================*/
 
+static void
+cm_pwl_callback(ARGS, Mif_Callback_Reason_t reason)
+{
+    switch (reason) {
+        case MIF_CB_DESTROY: {
+            double *last_x_value = STATIC_VAR (last_x_value);
+            double *x = STATIC_VAR (x);            
+            double *y = STATIC_VAR (y);            
+            free(last_x_value);
+            free(x);
+            free(y);
+            STATIC_VAR (last_x_value) = NULL;
+            STATIC_VAR (x) = NULL;
+            STATIC_VAR (y) = NULL;            
+            break;
+        }
+    }
+}
+
 /*=== CM_PWL ROUTINE ================*/
 
 void cm_pwl(ARGS)  /* structure holding parms, 
@@ -240,8 +259,10 @@ void cm_pwl(ARGS)  /* structure holding parms,
     double lower_slope;     /* slope of the lower segment */
     double upper_slope;     /* slope of the upper segment */
     double x_input;         /* input */
-    double out;             /* output */
-    double dout_din;        /* partial derivative of the output wrt input */
+    double out = 0.0;       /* output
+                             * Init to 0 to suppress compiler warning */
+    double dout_din = 0.0;  /* partial derivative of the output wrt input.
+                             * Init to 0 to suppress compiler warning */
     double threshold_lower; /* value below which the output begins smoothing */
     double threshold_upper; /* value above which the output begins smoothing */
     double test1;           /* debug testing value */
@@ -250,7 +271,9 @@ void cm_pwl(ARGS)  /* structure holding parms,
     double test;            /* temp storage variable for limit testing */
 
     Mif_Complex_t ac_gain;
-                                           
+
+    CALLBACK = cm_pwl_callback;
+
     char *allocation_error="\n***ERROR***\nPWL: Allocation calloc failed!\n";
     char *limit_error="\n***ERROR***\nPWL: Violation of 50% rule in breakpoints!\n";
 

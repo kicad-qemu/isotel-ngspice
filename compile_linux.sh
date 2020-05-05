@@ -1,12 +1,12 @@
 #!/bin/bash
-# ngspice build script for Linux, release version, 32 or 64 bit
-# compile_linux.sh
+# ngspice build script for Linux, release or debug version, 64 bit
+# compile_linux.sh <d>
 
 # Procedure:
 # Install gcc, bison, flex, libtool, autoconf, automake, 
 # libx11 and libx11-dev (headers), libXaw and libXaw-dev, libreadline and dev
 # Declare 'compile_linux.sh' executable and start compiling with
-# './compile_linux.sh' or './compile_min.sh 64' from the ngspice directory.
+# './compile_linux.sh' or './compile_linux.sh d' from the ngspice directory.
 # Options:
 # --adms and --enable-adms will install extra HICUM, EKV and MEXTRAM models via the 
 # adms interface. You need to download and install the *.va files via ng-adms-va.tgz 
@@ -19,10 +19,12 @@
 # Add (optionally) --enable-relpath to avoid absolute paths when searching for code models.
 # It might be necessary to uncomment and run ./autogen.sh .
 
-if test "$1" = "64"; then
-   if [ ! -d "release64" ]; then
-      mkdir release64
-      if [ $? -ne 0 ]; then  echo "mkdir release64 failed"; exit 1 ; fi
+SECONDS=0
+
+if test "$1" = "d"; then
+   if [ ! -d "debug" ]; then
+      mkdir debug
+      if [ $? -ne 0 ]; then  echo "mkdir debug failed"; exit 1 ; fi
    fi   
 else
    if [ ! -d "release" ]; then
@@ -42,20 +44,20 @@ if [ $? -ne 0 ]; then  echo "./autogen.sh failed"; exit 1 ; fi
 #if [ $? -ne 0 ]; then  echo "./autogen.sh failed"; exit 1 ; fi
 
 echo
-if test "$1" = "64"; then
-   cd release64
-   if [ $? -ne 0 ]; then  echo "cd release64 failed"; exit 1 ; fi
-  echo "configuring for 64 bit"
+if test "$1" = "d"; then
+   cd debug
+   if [ $? -ne 0 ]; then  echo "cd debug failed"; exit 1 ; fi
+  echo "configuring for 64 bit debug"
   echo
 # You may add  --enable-adms to the following command for adding adms generated devices 
-  ../configure --with-x --enable-xspice --enable-cider --with-readline=yes --enable-openmp --disable-debug CFLAGS="-m64 -O2" LDFLAGS="-m64 -s"
+  ../configure --with-x --enable-xspice --enable-cider --with-readline=yes --enable-openmp CFLAGS="-g -m64 -O0 -Wall -Wno-unused-but-set-variable" LDFLAGS="-m64 -g"
 else
    cd release
    if [ $? -ne 0 ]; then  echo "cd release failed"; exit 1 ; fi
-  echo "configuring for 32 bit"
+  echo "configuring for 64 bit release"
   echo
 # You may add  --enable-adms to the following command for adding adms generated devices 
-  ../configure --with-x --enable-xspice --enable-cider --with-readline=yes --enable-openmp --disable-debug CFLAGS="-m32 -O2" LDFLAGS="-m32 -s"
+  ../configure --with-x --enable-xspice --enable-cider --with-readline=yes --enable-openmp --disable-debug CFLAGS="-m64 -O2" LDFLAGS="-m64 -s"
 fi
 if [ $? -ne 0 ]; then  echo "../configure failed"; exit 1 ; fi
 
@@ -69,12 +71,14 @@ echo "compiling (see make.log)"
 make 2>&1 -j8 | tee make.log
 exitcode=${PIPESTATUS[0]}
 if [ $exitcode -ne 0 ]; then  echo "make failed"; exit 1 ; fi
-# 32 bit: Install to C:\Spice
-# 64 bit: Install to C:\Spice64
+# Install to /usr/local
 echo "installing (see make_install.log)"
 make install 2>&1 | tee make_install.log 
 exitcode=${PIPESTATUS[0]}
 if [ $exitcode -ne 0 ]; then  echo "make install failed"; exit 1 ; fi
 
+ELAPSED="Elapsed compile time: $(($SECONDS / 3600))hrs $((($SECONDS / 60) % 60))min $(($SECONDS % 60))sec"
+echo
+echo $ELAPSED
 echo "success"
 exit 0

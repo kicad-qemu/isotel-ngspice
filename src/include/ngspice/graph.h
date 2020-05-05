@@ -33,6 +33,8 @@ struct graph {
     int currentcolor;
     int linestyle;
 
+    bool nolegend;
+
     struct {
         int height, width;
     } viewport;
@@ -61,6 +63,7 @@ struct graph {
 
     int ticmarks;           /* mark every ticmark'th point */
     double *ticdata;
+    char ticchar[2];
     int fontwidth, fontheight;  /* for use in grid */
 
     PLOTTYPE plottype;      /* defined in FTEconstant.h */
@@ -104,11 +107,21 @@ struct graph {
     /* for zoomin */
     char *commandline;
 
+    /* colors used */
+    unsigned long colorarray[25];
+
+    /* we have a mother graph */
+    int mgraphid;
+
+    /* linewidths */
+    int graphwidth;
+    int gridwidth;
+
     /* Space here is allocated by NewViewport
         and de-allocated by DestroyGraph.
     */
     void *devdep;
-
+    size_t n_byte_devdep; /* Size of devdep. Needed to allow copying */
 };
 
 

@@ -23,6 +23,9 @@ VDMOSconvTest(GENmodel *inModel, CKTcircuit *ckt)
     double vgd;
     double vgdo;
     double tol;
+    double delvd,vd,cd;
+    int selfheat;
+    double delTemp, deldelTemp;
 
     for( ; model != NULL; model = VDMOSnextModel(model)) {
         for(here = VDMOSinstances(model); here!= NULL;
@@ -41,18 +44,29 @@ VDMOSconvTest(GENmodel *inModel, CKTcircuit *ckt)
             delvds = vds - *(ckt->CKTstate0 + here->VDMOSvds);
             delvgd = vgd-vgdo;
 
+            selfheat = (here->VDMOSthermalGiven) && (model->VDMOSrthjcGiven);
+            if (selfheat) {
+                delTemp = *(ckt->CKTrhs + here->VDMOStempNode);
+                deldelTemp = delTemp - *(ckt->CKTstate0 + here->VDMOSdelTemp);
+            } else {
+                delTemp = 0.0;
+                deldelTemp = 0.0;
+            }
+
             /* these are needed for convergence testing */
 
             if (here->VDMOSmode >= 0) {
                 cdhat=
                     here->VDMOScd -
                     here->VDMOSgm * delvgs + 
-                    here->VDMOSgds * delvds ;
+                    here->VDMOSgds * delvds +
+                    here->VDMOSgmT * deldelTemp;
             } else {
                 cdhat=
                     here->VDMOScd -
                     here->VDMOSgm * delvgd + 
-                    here->VDMOSgds * delvds ;
+                    here->VDMOSgds * delvds +
+                    here->VDMOSgmT * deldelTemp;
             }
             /*
              *  check convergence
@@ -64,6 +78,34 @@ VDMOSconvTest(GENmodel *inModel, CKTcircuit *ckt)
                 ckt->CKTtroubleElt = (GENinstance *) here;
                 return(OK); /* no reason to continue, we haven't converged */
             }
+
+            /*  
+             *   initialization 
+             */
+
+            vd = *(ckt->CKTrhsOld+here->VDIOposPrimeNode)-
+                    *(ckt->CKTrhsOld + here->VDMOSdNode);
+
+            delvd=vd- *(ckt->CKTstate0 + here->VDIOvoltage);
+
+            cdhat= *(ckt->CKTstate0 + here->VDIOcurrent) +
+                    *(ckt->CKTstate0 + here->VDIOconduct) * delvd +
+                    *(ckt->CKTstate0 + here->VDIOdIdio_dT) * deldelTemp;
+
+            cd= *(ckt->CKTstate0 + here->VDIOcurrent);
+
+            /*
+             *   check convergence
+             */
+            tol=ckt->CKTreltol*
+                    MAX(fabs(cdhat),fabs(cd))+ckt->CKTabstol;
+            if (fabs(cdhat-cd) > tol) {
+                ckt->CKTnoncon++;
+                ckt->CKTtroubleElt = (GENinstance *) here;
+                return(OK); /* don't need to check any more device */
+            }
+
+
         }
     }
     return(OK);

@@ -2,10 +2,10 @@
 #include "ngspice/dvec.h"
 
 
-struct dvec *
-dvec_alloc(char *name, int type, short flags, int length, void *storage)
+struct dvec *dvec_alloc(/* NOT const -- assigned to char */ char *name,
+        int type, short flags, int length, void *storage)
 {
-    struct dvec *rv = TMALLOC(struct dvec, 1);
+    struct dvec * const rv = TMALLOC(struct dvec, 1);
 
     /* If the allocation failed, return NULL as a failure flag.
      * As of 2019-03, TMALLOC will not return on failure, so this check is
@@ -26,6 +26,8 @@ dvec_alloc(char *name, int type, short flags, int length, void *storage)
     rv->v_flags = flags;
     rv->v_length = length;
     rv->v_alloc_length = length;
+    rv->v_numdims = 1; /* Assume 1 D */
+    rv->v_dims[0] = length;
 
     if (length == 0) { /* Redundant due to ZERO() call above */
         rv->v_realdata = NULL;
@@ -51,63 +53,83 @@ dvec_alloc(char *name, int type, short flags, int length, void *storage)
      * the ZERO() call */
     rv->v_plot = NULL;
     rv->v_scale = NULL;
-    rv->v_numdims = 0; /* Really "unknown" */
 
     return rv;
-}
+} /* end of function dvec_alloc */
 
 
-void
-dvec_realloc(struct dvec *v, int length, void *storage)
+/* Resize dvec to length if storage is NULL orr replace
+ * its existing allocation with storage if not
+ */
+void dvec_realloc(struct dvec *v, int length, void *storage)
 {
     if (isreal(v)) {
         if (storage) {
             tfree(v->v_realdata);
             v->v_realdata = (double *) storage;
-        } else {
+        }
+        else {
             v->v_realdata = TREALLOC(double, v->v_realdata, length);
         }
-    } else {
+    }
+    else {
         if (storage) {
             tfree(v->v_compdata);
             v->v_compdata = (ngcomplex_t *) storage;
-        } else {
+        }
+        else {
             v->v_compdata = TREALLOC(ngcomplex_t, v->v_compdata, length);
         }
     }
 
     v->v_length = length;
     v->v_alloc_length = length;
-}
+} /* end of function dvec_realloc */
 
 
-void
-dvec_extend(struct dvec *v, int length)
+void dvec_extend(struct dvec *v, int length)
 {
-    if (isreal(v))
+    if (isreal(v)) {
         v->v_realdata = TREALLOC(double, v->v_realdata, length);
-    else
+    }
+    else {
         v->v_compdata = TREALLOC(ngcomplex_t, v->v_compdata, length);
+    }
 
     v->v_alloc_length = length;
-}
+} /* end of function dvec_extend */
 
 
-void
-dvec_trunc(struct dvec *v, int length)
+
+void dvec_trunc(struct dvec *v, int length)
 {
-    v->v_length = length;
-}
+    /* Ensure valid */
+    if (v->v_alloc_length <= length) {
+        v->v_length = length;
+    }
+} /* end of function dvec_trunc */
 
 
-void
-dvec_free(struct dvec *v)
+
+void dvec_free(struct dvec *v)
 {
-    if (v->v_name)
-        tfree(v->v_name);
-    if (v->v_realdata)
-        tfree(v->v_realdata);
-    if (v->v_compdata)
-        tfree(v->v_compdata);
-    tfree(v);
-}
+    /* Check for freed vector */
+    if (v == (struct dvec *) NULL) {
+        return;
+    }
+
+    /* Free the various allocations */
+    if (v->v_name) {
+        txfree(v->v_name);
+    }
+    if (v->v_realdata) {
+        txfree(v->v_realdata);
+    }
+    else if (v->v_compdata) { /* if data real, not complex */
+        txfree(v->v_compdata);
+    }
+    txfree(v);
+} /* end of function dvec_free */
+
+
+

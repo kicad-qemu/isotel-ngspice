@@ -189,43 +189,51 @@ basename(const char *name)
 
 
 #if defined(HAS_WINGUI) || defined(_MSC_VER) || defined(__MINGW32__)
-
-char *
-ngdirname(const char *name)
+/* This function returns the path portion of name or "." if it is NULL.
+ * The returned string is a new allocation that must be freed by the
+ * caller */
+char *ngdirname(const char *name)
 {
-    char *ret;
-    const char *end = NULL;
-    int start = 0;
-
-    if(name && ((name[0] >= 'a' && name[0] <= 'z') ||
-                (name[0] >= 'A' && name[0] <= 'Z')) && name[1] == ':')
-        start = 2;
-
-    if(name) {
-        const char *p = name + start;
-        for(; *p; p++)
-            if(*p == '/' || *p == '\\')
-                end = p;
+    /* If name not given, return "." */
+    if (name == (char *) NULL) {
+        return dup_string(".", 1);
     }
 
-    if(end && end == name + start)
-        end++;
+    /* Offset to start of path name after any drive letter present */
+    const int start = (((name[0] >= 'a' && name[0] <= 'z') ||
+            (name[0] >= 'A' && name[0] <= 'Z')) && name[1] == ':') ? 2 : 0;
 
-    if(end)
-        ret = copy_substring(name, end);
-    else {
-        char *p = TMALLOC(char, 4);
-        ret = p;
-        if(start) {
+    /* Find last dir separator, if any, and return the input directory up to
+     * that separator or including it if it is the 1st char after any drive
+     *specification. */
+    {
+        const char *p0 = name + start; /* 1st char past drive */
+        const char *p;
+        for (p = p0 + strlen(name + start) - 1; p >= p0; --p) {
+            const char ch_cur = *p;
+            if (ch_cur == '/' || ch_cur == '\\') { /* at last dir sep */
+                /* Stop copy at last dir sep or right after if
+                 * it is the first char after any drive spec.
+                 * In the second case return "[drive]<dir sep>" */
+                const char * const end = p + (p == p0);
+                return copy_substring(name, end);
+            }
+        }
+    }
+
+    /* No directory separator found so return "[drive]." */
+    {
+        char * const ret = TMALLOC(char, 2 + start);
+        char *p = ret;
+        if (start) { /* Add drive letter if found */
             *p++ = name[0];
             *p++ = name[1];
         }
         *p++ = '.';
-        *p++ = '\0';
+        *p = '\0';
+        return ret;
     }
-
-    return ret;
-}
+} /* end of function ngdirname */
 
 #else
 
@@ -249,3 +257,27 @@ ngdirname(const char *name)
 }
 
 #endif
+
+/* Replacement for fopen, when using wide chars (utf-16) */
+#ifndef EXT_ASC
+#if defined(__MINGW32__) || defined(_MSC_VER)
+#undef BOOLEAN
+#include <windows.h>
+FILE *
+newfopen(const char *fn, const char* md)
+{
+    if (fn == NULL)
+        return NULL;
+    wchar_t wfn[BSIZE_SP];
+    wchar_t wmd[16];
+    MultiByteToWideChar(CP_UTF8, 0, md, -1, wmd, 15);
+    if (MultiByteToWideChar(CP_UTF8, 0, fn, -1, wfn, BSIZE_SP - 1) == 0) {
+        fprintf(stderr, "UTF-8 to UTF-16 conversion failed with 0x%x\n", GetLastError());
+        fprintf(stderr, "%s could not be converted\n", fn);
+        return NULL;
+    }
+    return _wfopen(wfn, wmd);
+}
+#endif
+#endif
+

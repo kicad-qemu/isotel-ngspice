@@ -448,20 +448,23 @@
 /* Name of package */
 #define PACKAGE "ngspice"
 
+/* Version number of package */
+#define VERSION "32" //" Built on " __DATE__ " at " __TIME__
+
 /* Define to the address where bug reports for this package should be sent. */
 #define PACKAGE_BUGREPORT "http://ngspice.sourceforge.net/bugrep.html"
 
 /* Define to the full name of this package. */
-#define PACKAGE_NAME "ngspice"
+#define PACKAGE_NAME PACKAGE
 
 /* Define to the full name and version of this package. */
-#define PACKAGE_STRING "ngspice 31+"
+#define PACKAGE_STRING PACKAGE " " VERSION
 
 /* Define to the one symbol short name of this package. */
-#define PACKAGE_TARNAME "ngspice"
+#define PACKAGE_TARNAME PACKAGE
 
 /* Define to the version of this package. */
-#define PACKAGE_VERSION "31+"
+#define PACKAGE_VERSION VERSION
 
 /* Define if we want predictor algorithm */
 /* #undef PREDICTOR */
@@ -515,9 +518,6 @@
 /* Define to 1 if your <sys/time.h> declares `struct tm'. */
 /* #undef TM_IN_SYS_TIME */
 
-/* Version number of package */
-#define VERSION "31+"
-
 /* Define if we want spice2 sensitivity analysis */
 /* #undef WANT_SENSE2 */
 
@@ -551,3 +551,7 @@
 
 /* Define as `fork' if `vfork' does not work. */
 #define vfork fork
+
+#define HAVE_XFT
+
+//#define EXT_ASC

@@ -16,13 +16,20 @@
 ./autogen.sh
 
 ./configure \
+  --with-x \
   --enable-xspice \
   --enable-cider \
   --enable-pss \
+  --with-readline=yes \
+  --enable-openmp \
   --disable-debug \
-  --prefix=/Applications/ngspice
+  --prefix=/Applications/ngspice \
+  CFLAGS="-O2 -I/opt/X11/include/freetype2" \
+  LDFLAGS="-lomp"
+# The last two lines may depend on the lib installations
+# please check if there are any problems
 
-make
+make -j4
 make DESTDIR="$(pwd)/root-tree" install
 
 # Package

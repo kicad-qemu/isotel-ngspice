@@ -38,6 +38,8 @@ NON-STANDARD FEATURES
 ============================================================================*/
 
 
+#include <stdarg.h>
+#include <stdbool.h>
 #include <stdio.h>
 
 #define IFSPEC_FILENAME  "ifspec.ifs"
@@ -47,29 +49,26 @@ NON-STANDARD FEATURES
 
 #ifdef _MSC_VER
 #include <io.h>
+#include <string.h>
+
+/* If CRT debugging is being used so that crtdbg.h is included, strdup will
+ * be defined to a debug version. In this case, strdup should not be
+ * redefined to the standard version. */
+#ifndef strdup
 #define strdup _strdup
+#endif
+
 #define unlink _unlink
 #define isatty _isatty
 #define fileno _fileno
-#endif
+#endif /* _MSC_VER */
 
 /* *********************************************************************** */
-
-typedef enum {
-
-   OK,       /* Returned with no error */
-   ERROR,    /* Returned with error */
-
-} Status_t;
-
-
 
 #define  GET_IFS_TABLE    0  /* Read the entire ifs table */
 #define  GET_IFS_NAME     1  /* Get the C function name out of the table only */
 
-#define  MAX_PATH_LEN  1024  /* Maximum pathname length */
 #define  MAX_NAME_LEN  1024  /* Maximum SPICE name length */
-#define  MAX_FN_LEN      31  /* Maximum filename length */
 
 
 /* ******************************************************************** */
@@ -77,23 +76,13 @@ typedef enum {
 /* ******************************************************************** */
 
 /*
- * The boolean type
- */
-
-typedef enum {
-    FALSE,
-    TRUE,
-} Boolean_t;
-
-
-/*
  * The direction of a connector
  */
 
 typedef enum {
-    IN,
-    OUT,
-    INOUT,
+    CMPP_IN,
+    CMPP_OUT,
+    CMPP_INOUT,
 } Dir_t;
 
 
@@ -122,14 +111,13 @@ typedef enum {
  */
 
 typedef enum {
-    BOOLEAN,
-    INTEGER,
-    REAL,
-    COMPLEX,
-    STRING,
-    POINTER,   /* NOTE: POINTER should not be used for Parameters - only
-		* Static_Vars  - this is enforced by the cmpp.
-		*/
+    CMPP_BOOLEAN,
+    CMPP_INTEGER,
+    CMPP_REAL,
+    CMPP_COMPLEX,
+    CMPP_STRING,
+    CMPP_POINTER, /* NOTE: CMPP_POINTER should not be used for Parameters -
+                   * only Static_Vars  - this is enforced by the cmpp. */
  } Data_Type_t;
 
 
@@ -157,7 +145,7 @@ typedef struct {
 
 typedef struct {
 
-    Boolean_t   bvalue;         /* For BOOLEAN parameters */
+    bool        bvalue;         /* For BOOLEAN parameters */
     int         ivalue;         /* For INTEGER parameters */
     double      rvalue;         /* For REAL parameters    */
     Complex_t   cvalue;         /* For COMPLEX parameters */
@@ -198,14 +186,14 @@ typedef struct {
     int             num_allowed_types;  /* The size of the allowed type arrays */
     Port_Type_t     *allowed_port_type; /* Array of allowed types */
     char            **allowed_type;     /* Array of allowed types in string form */
-    Boolean_t       is_array;           /* True if connection is an array       */
-    Boolean_t       has_conn_ref;     /* True if there is associated with an array conn */
+    bool            is_array;           /* True if connection is an array       */
+    bool            has_conn_ref;     /* True if there is associated with an array conn */
     int             conn_ref;         /* Subscript of the associated array conn */
-    Boolean_t       has_lower_bound;    /* True if there is an array size lower bound */
+    bool            has_lower_bound;    /* True if there is an array size lower bound */
     int             lower_bound;        /* Array size lower bound */
-    Boolean_t       has_upper_bound;    /* True if there is an array size upper bound */
+    bool            has_upper_bound;    /* True if there is an array size upper bound */
     int             upper_bound;        /* Array size upper bound */
-    Boolean_t       null_allowed;       /* True if null is allowed for this connection */
+    bool            null_allowed;       /* True if null is allowed for this connection */
 
 } Conn_Info_t;
 
@@ -221,20 +209,20 @@ typedef struct {
     char            *name;            /* Name of this parameter */
     char            *description;     /* Description of this parameter */
     Data_Type_t     type;             /* Data type, e.g. REAL, INTEGER, ... */
-    Boolean_t       has_default;      /* True if there is a default value */
+    bool            has_default;      /* True if there is a default value */
     Value_t         default_value;    /* The default value */
-    Boolean_t       has_lower_limit;  /* True if there is a lower limit */
+    bool            has_lower_limit;  /* True if there is a lower limit */
     Value_t         lower_limit;      /* The lower limit for this parameter */
-    Boolean_t       has_upper_limit;  /* True if there is a upper limit */
+    bool            has_upper_limit;  /* True if there is a upper limit */
     Value_t         upper_limit;      /* The upper limit for this parameter */
-    Boolean_t       is_array;         /* True if parameter is an array       */
-    Boolean_t       has_conn_ref;     /* True if there is associated with an array conn */
+    bool            is_array;         /* True if parameter is an array       */
+    bool            has_conn_ref;     /* True if there is associated with an array conn */
     int             conn_ref;         /* Subscript of the associated array conn */
-    Boolean_t       has_lower_bound;  /* True if there is an array size lower bound */
+    bool            has_lower_bound;  /* True if there is an array size lower bound */
     int             lower_bound;      /* Array size lower bound */
-    Boolean_t       has_upper_bound;  /* True if there is an array size upper bound */
+    bool            has_upper_bound;  /* True if there is an array size upper bound */
     int             upper_bound;      /* Array size upper bound */
-    Boolean_t       null_allowed;     /* True if null is allowed for this parameter */
+    bool            null_allowed;     /* True if null is allowed for this parameter */
 
 } Param_Info_t;
 
@@ -248,7 +236,7 @@ typedef struct {
     char            *name;            /* Name of this parameter */
     char            *description;     /* Description of this parameter */
     Data_Type_t     type;             /* Data type, e.g. REAL, INTEGER, ... */
-    Boolean_t       is_array;         /* True if parameter is an array       */
+    bool            is_array;         /* True if parameter is an array       */
 
 } Inst_Var_Info_t;
 
@@ -280,7 +268,9 @@ void preprocess_ifs_file(void);
 
 void preprocess_lst_files(void);
 
-void preprocess_mod_file(char *filename);
+void preprocess_mod_file(const char *filename);
+
+int output_paths_from_lst_file(const char *filename);
 
 
 void init_error (char *program_name);
@@ -290,17 +280,19 @@ void print_error(const char *fmt, ...) __attribute__ ((format (__printf__, 1, 2)
 #else
 void print_error(const char *fmt, ...);
 #endif
+void vprint_error(const char *fmt, va_list p);
 
 void str_to_lower(char *s);
 
 
-Status_t read_ifs_file(const char *filename, int mode, Ifs_Table_t *ifs_table);
+int read_ifs_file(const char *filename, int mode, Ifs_Table_t *ifs_table);
 
-Status_t write_ifs_c_file(const char *filename, Ifs_Table_t *ifs_table);
+int write_ifs_c_file(const char *filename, Ifs_Table_t *ifs_table);
 
 
-FILE *fopen_cmpp(const char **path_p, const char *mode);
+char *gen_filename(const char *filename, const char *mode);
 
+void rem_ifs_table(Ifs_Table_t *ifs_table);
 
 /*
  * type safe variants of the <ctype.h> functions for char arguments

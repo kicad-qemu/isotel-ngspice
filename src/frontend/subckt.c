@@ -239,13 +239,17 @@ inp_subcktexpand(struct card *deck) {
 
         nupa_signal(NUPADECKCOPY);
         /* get the subckt names from the deck */
-        for (c = deck; c; c = c->nextcard)    /* first Numparam pass */
-            if (ciprefix(".subckt", c->line))
+        for (c = deck; c; c = c->nextcard) {    /* first Numparam pass */
+            if (ciprefix(".subckt", c->line)) {
                 nupa_scan(c);
+            }
+        }
+
         /* now copy instances */
         for (c = deck; c; c = c->nextcard) {  /* first Numparam pass */
-            if (*(c->line) == '*')
+            if (*(c->line) == '*') {
                 continue;
+            }
             c->line = nupa_copy(c);
         }
 
@@ -456,7 +460,6 @@ doit(struct card *deck, wordlist *modnames) {
         struct card *prev_of_c = NULL;
 
         while (c) {
-
             if (ciprefix(sbend, c->line)) {  /* if line == .ends  */
                 fprintf(cp_err, "Error: misplaced %s line: %s\n", sbend,
                         c->line);
@@ -697,8 +700,7 @@ doit(struct card *deck, wordlist *modnames) {
 /*-------------------------------------------------------------------*/
 /* Copy a deck, including the actual lines.                          */
 /*-------------------------------------------------------------------*/
-struct card *
-inp_deckcopy(struct card *deck) {
+struct card * inp_deckcopy(struct card *deck) {
     struct card *d = NULL, *nd = NULL;
 
     while (deck) {
@@ -724,8 +726,7 @@ inp_deckcopy(struct card *deck) {
  * without .control section(s).
  * First line is always copied (except being .control).
  */
-struct card *
-inp_deckcopy_oc(struct card *deck)
+struct card *inp_deckcopy_oc(struct card * deck)
 {
     struct card *d = NULL, *nd = NULL;
     int skip_control = 0, i = 0;
@@ -746,26 +747,29 @@ inp_deckcopy_oc(struct card *deck)
             deck = deck->nextcard;
             continue;
         }
-        if (nd) {
-            d->nextcard = TMALLOC(struct card, 1);
-            d = d->nextcard;
+        if (nd) { /* First card already found */
+            /* d is the card at the end of the deck */
+            d = d->nextcard = TMALLOC(struct card, 1);
         }
-        else {
+        else { /* This is the first card */
             nd = d = TMALLOC(struct card, 1);
         }
         d->linenum_orig = deck->linenum;
         d->linenum = i++;
         d->line = copy(deck->line);
-        if (deck->error)
+        if (deck->error) {
             d->error = copy(deck->error);
+        }
         d->actualLine = NULL;
         deck = deck->nextcard;
-        while (deck && *(deck->line) == '*')
+        while (deck && *(deck->line) == '*') { /* skip comments */
             deck = deck->nextcard;
-    }
+        }
+    } /* end of loop over cards in the source deck */
 
-    return (nd);
-}
+    return nd;
+} /* end of function inp_deckcopy_oc */
+
 
 
 /*-------------------------------------------------------------------
@@ -1807,7 +1811,7 @@ devmodtranslate(struct card *s, char *subname, wordlist * const orig_modnames)
             tfree(name);
             break;
 
-            /* 4-7 terminal mos devices */
+            /* 3-7 terminal mos devices */
         case 'm':
             name = gettok(&t);  /* get refdes */
             bxx_printf(&buffer, "%s ", name);
@@ -1821,10 +1825,11 @@ devmodtranslate(struct card *s, char *subname, wordlist * const orig_modnames)
             name = gettok_node(&t);  /* get third attached netname */
             bxx_printf(&buffer, "%s ", name);
             tfree(name);
-            name = gettok_node(&t);  /* get fourth attached netname */
-            bxx_printf(&buffer, "%s ", name);
-            tfree(name);
-            name = gettok(&t);
+            name = gettok_node(&t);
+
+            if (!name) {
+                break;
+            }
 
             found = 0;
             while (!found) {
@@ -1837,7 +1842,7 @@ devmodtranslate(struct card *s, char *subname, wordlist * const orig_modnames)
                 if (!found) { /* name was not a model - was a netname */
                     bxx_printf(&buffer, "%s ", name);
                     tfree(name);
-                    name = gettok(&t);
+                    name = gettok_node(&t);
                     if (name == NULL) {
                         name = copy(""); /* allow 'tfree' */
                         break;

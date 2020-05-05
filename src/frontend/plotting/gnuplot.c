@@ -1,5 +1,4 @@
 /**********
- * From xgraph.c:
  * Copyright 1992 Regents of the University of California.  All rights reserved.
  * Author: 1992 David A. Gates, U. C. Berkeley CAD Group
  *
@@ -32,6 +31,8 @@ quote_gnuplot_string(FILE *stream, char *s)
     fputc('"', stream);
 
     for (; *s; s++)
+        /* NOTE: The FALLTHROUGH comment is used to suppress a GCC warning
+         * when flag -Wimplicit-fallthrough is present */
         switch (*s) {
         case '\n':
             fputs("\\n", stream);
@@ -39,6 +40,7 @@ quote_gnuplot_string(FILE *stream, char *s)
         case '"':
         case '\\':
             fputc('\\', stream);
+            /* FALLTHROUGH */
         default:
             fputc(*s, stream);
         }
@@ -47,13 +49,16 @@ quote_gnuplot_string(FILE *stream, char *s)
 }
 
 
-void
-ft_gnuplot(double *xlims, double *ylims, char *filename, char *title, char *xlabel, char *ylabel, GRIDTYPE gridtype, PLOTTYPE plottype, struct dvec *vecs)
+void ft_gnuplot(double *xlims, double *ylims,
+        const char *filename, const char *title,
+        const char *xlabel, const char *ylabel,
+        GRIDTYPE gridtype, PLOTTYPE plottype,
+        struct dvec *vecs)
 {
     FILE *file, *file_data;
     struct dvec *v, *scale = NULL;
     double xval, yval, prev_xval, extrange;
-    int i, dir, numVecs, linewidth, err, terminal_type;
+    int i, dir, numVecs, linewidth, gridlinewidth, err, terminal_type;
     bool xlog, ylog, nogrid, markers;
     char buf[BSIZE_SP], pointstyle[BSIZE_SP], *text, plotstyle[BSIZE_SP], terminal[BSIZE_SP];
 
@@ -82,23 +87,40 @@ ft_gnuplot(double *xlims, double *ylims, char *filename, char *title, char *xlab
 
     extrange = 0.05 * (ylims[1] - ylims[0]);
 
-    if (!cp_getvar("gnuplot_terminal", CP_STRING, terminal, sizeof(terminal))) {
+    if (!cp_getvar("gnuplot_terminal", CP_STRING,
+            terminal, sizeof(terminal))) {
         terminal_type = 1;
-    } else {
+    }
+    else {
         terminal_type = 1;
-        if (cieq(terminal,"png"))
+        if (cieq(terminal,"png")) {
             terminal_type = 2;
-        if (cieq(terminal,"png/quit"))
+        }
+        else if (cieq(terminal,"png/quit")) {
             terminal_type = 3;
-        if (cieq(terminal, "eps"))
+        }
+        else if (cieq(terminal, "eps")) {
             terminal_type = 4;
-        if (cieq(terminal, "eps/quit"))
+        }
+        else if (cieq(terminal, "eps/quit")) {
             terminal_type = 5;
+        }
+        else if (cieq(terminal, "xterm")) {
+            terminal_type = 6;
+        }
     }
 
+    /* get linewidth for plotting the graph from .spiceinit */
     if (!cp_getvar("xbrushwidth", CP_NUM, &linewidth, 0))
         linewidth = 1;
-    if (linewidth < 1) linewidth = 1;
+    if (linewidth < 1)
+        linewidth = 1;
+    /* get linewidth for grid from .spiceinit */
+    if (!cp_getvar("xgridwidth", CP_NUM, &gridlinewidth, 0))
+        gridlinewidth = 1;
+    if (gridlinewidth < 1)
+        gridlinewidth = 1;
+
 
     if (!cp_getvar("pointstyle", CP_STRING, pointstyle, sizeof(pointstyle))) {
         markers = FALSE;
@@ -142,9 +164,16 @@ ft_gnuplot(double *xlims, double *ylims, char *filename, char *title, char *xlab
     }
 
     /* Set up the file header. */
-#if !defined(__MINGW32__) && !defined(_MSC_VER)
+#if !defined(__MINGW32__) && !defined(_MSC_VER) && !defined(__CYGWIN__)
     fprintf(file, "set terminal X11 noenhanced\n");
+#elif defined(__CYGWIN__)
+#ifndef EXT_ASC
+        fprintf(file, "set encoding utf8\n");
+#endif
 #else
+#ifndef EXT_ASC
+        fprintf(file, "set encoding utf8\n");
+#endif
     fprintf(file, "set termoption noenhanced\n");
 #endif
     if (title) {
@@ -169,8 +198,8 @@ ft_gnuplot(double *xlims, double *ylims, char *filename, char *title, char *xlab
         tfree(text);
     }
     if (!nogrid) {
-        if (linewidth > 1)
-            fprintf(file, "set grid lw %d \n" , linewidth);
+        if (gridlinewidth > 1)
+            fprintf(file, "set grid lw %d \n" , gridlinewidth);
         else
             fprintf(file, "set grid\n");
     }
@@ -204,8 +233,8 @@ ft_gnuplot(double *xlims, double *ylims, char *filename, char *title, char *xlab
     fprintf(file, "#set ytics 1\n");
     fprintf(file, "#set y2tics 1\n");
 
-    if (linewidth > 1)
-        fprintf(file, "set border lw %d\n", linewidth);
+    if (gridlinewidth > 1)
+        fprintf(file, "set border lw %d\n", gridlinewidth);
 
     if (plottype == PLOT_COMB) {
         strcpy(plotstyle, "boxes");
@@ -293,7 +322,7 @@ ft_gnuplot(double *xlims, double *ylims, char *filename, char *title, char *xlab
     (void) fclose(file);
 
     /* Write out the data and setup arrays */
-    bool mono = (plottype == PLOT_MONOLIN);
+    bool mono = (plottype != PLOT_RETLIN);
     dir = 0;
     prev_xval = NAN;
     for (i = 0; i < scale->v_length; i++) {
@@ -342,8 +371,12 @@ ft_gnuplot(double *xlims, double *ylims, char *filename, char *title, char *xlab
         fprintf(cp_out, "writing plot to file %s.eps\n", filename);
         (void) sprintf(buf, "gnuplot %s", filename_plt);
     }
-    else
+    else if (terminal_type == 6) {
         (void) sprintf(buf, "xterm -e gnuplot %s - &", filename_plt);
+    }
+    else {
+        (void) sprintf(buf, "gnuplot -p %s - &", filename_plt);
+    }
 #endif
     err = system(buf);
 
@@ -375,8 +408,11 @@ ft_gnuplot(double *xlims, double *ylims, char *filename, char *title, char *xlab
    if scale vectors are of same length (there is little risk here!).
    Width of numbers printed is set by option 'numdgt'.
  */
-void
-ft_writesimple(double *xlims, double *ylims, char *filename, char *title, char *xlabel, char *ylabel, GRIDTYPE gridtype, PLOTTYPE plottype, struct dvec *vecs)
+void ft_writesimple(double *xlims, double *ylims,
+        const char *filename, const char *title,
+        const char *xlabel, const char *ylabel,
+        GRIDTYPE gridtype, PLOTTYPE plottype,
+        struct dvec *vecs)
 {
     FILE *file_data;
     struct dvec *v;

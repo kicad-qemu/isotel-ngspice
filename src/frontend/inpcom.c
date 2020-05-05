@@ -9,10 +9,18 @@ Author: 1985 Wayne A. Christopher
   Central function is inp_readall()
 */
 
+/* Note: Must include shlwapi.h before ngspice header defining BOOL due
+ * to conflict */
+#ifdef _WIN32
+#include <shlwapi.h> /* for definition of PathIsRelativeA() */
+#pragma comment(lib, "Shlwapi.lib")
+#endif
+
 #include "ngspice/ngspice.h"
 
 #include "ngspice/compatmode.h"
 #include "ngspice/cpdefs.h"
+#include "ngspice/dstring.h"
 #include "ngspice/dvec.h"
 #include "ngspice/ftedefs.h"
 #include "ngspice/fteext.h"
@@ -47,8 +55,8 @@ Author: 1985 Wayne A. Christopher
 /*#define TRACE*/
 
 /* globals -- wanted to avoid complicating inp_readall interface */
-#define N_LIBRARIES 1000
-#define N_PARAMS 1000
+#define N_LIBRARIES       1000
+#define N_PARAMS          1000
 #define N_SUBCKT_W_PARAMS 4000
 
 #define NPARAMS 10000
@@ -69,7 +77,8 @@ struct names {
     int num_names;
 };
 
-struct function_env {
+struct function_env
+{
     struct function_env *up;
 
     struct function {
@@ -79,10 +88,11 @@ struct function_env {
         char *params[N_PARAMS];
         int num_parameters;
         const char *accept;
-    } * functions;
+    } *functions;
 };
 
-struct func_temper {
+struct func_temper
+{
     char *funcname;
     int subckt_depth;
     int subckt_count;
@@ -110,7 +120,8 @@ static void inp_stripcomments_line(char *s, bool cs);
 static void inp_fix_for_numparam(
         struct names *subckt_w_params, struct card *deck);
 static void inp_remove_excess_ws(struct card *deck);
-static void expand_section_references(struct card *deck, char *dir_name);
+static void expand_section_references(struct card *deck,
+        const char *dir_name);
 static void inp_grab_func(struct function_env *, struct card *deck);
 static void inp_fix_inst_calls_for_numparam(
         struct names *subckt_w_params, struct card *deck);
@@ -148,13 +159,13 @@ static void inp_add_series_resistor(struct card *deck);
 static void subckt_params_to_param(struct card *deck);
 static void inp_fix_temper_in_param(struct card *deck);
 static void inp_fix_agauss_in_param(struct card *deck, char *fcn);
-static void inp_vdmos_model(struct card *deck);
+static int inp_vdmos_model(struct card *deck);
 static void inp_check_syntax(struct card *deck);
 
 static char *inp_spawn_brace(char *s);
 
 static char *inp_pathresolve(const char *name);
-static char *inp_pathresolve_at(char *name, char *dir);
+static char *inp_pathresolve_at(const char *name, const char *dir);
 static char *search_plain_identifier(char *str, const char *identifier);
 
 static struct nscope *inp_add_levels(struct card *deck);
@@ -170,13 +181,17 @@ static void pspice_compat_a(struct card *oldcard);
 static struct card *ltspice_compat(struct card *oldcard);
 static void ltspice_compat_a(struct card *oldcard);
 
+#ifndef EXT_ASC
+static void utf8_syntax_check(struct card *deck);
+#endif
+
 struct inp_read_t {
     struct card *cc;
     int line_number;
 };
 
-static struct inp_read_t inp_read(
-        FILE *fp, int call_depth, char *dir_name, bool comfile, bool intfile);
+struct inp_read_t inp_read( FILE *fp, int call_depth, const char *dir_name,
+        bool comfile, bool intfile);
 
 
 #ifndef XSPICE
@@ -293,8 +308,7 @@ static struct card *find_section_definition(struct card *c, char *name)
     return NULL;
 }
 
-
-static struct library *read_a_lib(char *y, char *dir_name)
+static struct library *read_a_lib(const char *y, const char *dir_name)
 {
     char *yy, *y_resolved;
 
@@ -307,7 +321,7 @@ static struct library *read_a_lib(char *y, char *dir_name)
         return NULL;
     }
 
-#if defined(__MINGW32__) || defined(_MSC_VER)
+#if defined(_WIN32)
     yy = _fullpath(NULL, y_resolved, 0);
 #else
     yy = realpath(y_resolved, NULL);
@@ -342,11 +356,12 @@ static struct library *read_a_lib(char *y, char *dir_name)
         fclose(newfp);
     }
 
-    tfree(yy);
-    tfree(y_resolved);
+    txfree(yy);
+    txfree(y_resolved);
 
     return lib;
-}
+} /* end of function read_a_lib */
+
 
 
 static struct names *new_names(void)
@@ -556,13 +571,21 @@ static COMPATMODE_T ngspice_compat_mode(void)
   store contents in string new_title
   process .lib lines
   read file and library name, open file using fcn inp_pathopen()
-  read file contents and put into struct libraries[].deck, one entry per .lib
-  line process .inc lines read file and library name, open file using fcn
-  inp_pathopen() read file contents and add lines to cc make line entry lower
-  case allow for shell end of line continuation (\\) add '+' to beginning of
-  next line add line entry to list cc add '.global gnd' add libraries find
-  library section add lines add .end card strip end-of-line comments make
-  continuation lines a single line
+  read file contents and put into struct libraries[].deck, one entry per .lib line
+  process .inc lines
+  read file and library name, open file using fcn inp_pathopen()
+  read file contents and add lines to cc
+  make line entry lower case
+  allow for shell end of line continuation (\\)
+  add '+' to beginning of next line
+  add line entry to list cc
+  add '.global gnd'
+  add libraries
+  find library section
+  add lines
+  add .end card
+  strip end-of-line comments
+  make continuation lines a single line
   *** end of processing for command files ***
   start preparation of input deck for numparam
   ...
@@ -570,8 +593,8 @@ static COMPATMODE_T ngspice_compat_mode(void)
   remove the 'level' entries from each card
   *-------------------------------------------------------------------------*/
 
-struct card *inp_readall(FILE *fp, char *dir_name, bool comfile, bool intfile,
-        bool *expr_w_temper_p)
+struct card *inp_readall(FILE *fp, const char *dir_name,
+        bool comfile, bool intfile, bool *expr_w_temper_p)
 {
     struct card *cc;
     struct inp_read_t rv;
@@ -600,6 +623,10 @@ struct card *inp_readall(FILE *fp, char *dir_name, bool comfile, bool intfile,
         struct card *working = cc->nextcard;
 
         delete_libs();
+		
+#ifndef EXT_ASC
+        utf8_syntax_check(working);
+#endif		
 
         /* some syntax checks, including title line */
         inp_check_syntax(cc);
@@ -619,7 +646,9 @@ struct card *inp_readall(FILE *fp, char *dir_name, bool comfile, bool intfile,
 
         inp_remove_excess_ws(working);
 
-        inp_vdmos_model(working);
+        if(inp_vdmos_model(working))
+            return NULL;
+
         /* don't remove unused model if we have an .if clause, because we
            cannot yet decide here which model we finally will need */
         if (!has_if) {
@@ -716,16 +745,16 @@ struct card *inp_readall(FILE *fp, char *dir_name, bool comfile, bool intfile,
                 for (t = cc->nextcard; t; t = t->nextcard) {
                     if (*(t->line) == '*')
                         continue;
-                    fprintf(fd, "%6d  %6d  %s\n", t->linenum_orig, t->linenum,
-                            t->line);
+                    fprintf(fd, "%6d  %6d  %s\n",
+                            t->linenum_orig, t->linenum, t->line);
                 }
                 fprintf(fd,
                         "\n****************** complete deck "
                         "***************\n\n");
                 /* now completely */
                 for (t = cc; t; t = t->nextcard)
-                    fprintf(fd, "%6d  %6d  %s\n", t->linenum_orig, t->linenum,
-                            t->line);
+                    fprintf(fd, "%6d  %6d  %s\n",
+                            t->linenum_orig, t->linenum, t->line);
                 fclose(fd);
 
                 fprintf(stdout,
@@ -745,8 +774,8 @@ struct card *inp_readall(FILE *fp, char *dir_name, bool comfile, bool intfile,
 }
 
 
-struct inp_read_t inp_read(
-        FILE *fp, int call_depth, char *dir_name, bool comfile, bool intfile)
+struct inp_read_t inp_read( FILE *fp, int call_depth, const char *dir_name,
+        bool comfile, bool intfile)
 /* fp: in, pointer to file to be read,
    call_depth: in, nested call to fcn
    dir_name: in, name of directory of file to be read
@@ -763,8 +792,8 @@ struct inp_read_t inp_read(
     int line_count = 0;
 #endif
     char *new_title = NULL;
-    int line_number =
-            1; /* sjb - renamed to avoid confusion with struct card */
+    int line_number = 1;
+            /* sjb - renamed to avoid confusion with struct card */
     int line_number_orig = 1;
     int cirlinecount = 0; /* length of circarray */
     static int is_control = 0; /* We are reading from a .control section */
@@ -828,8 +857,9 @@ struct inp_read_t inp_read(
 #else
 
             buffer = readline(fp);
-            if (!buffer)
+            if (!buffer) {
                 break;
+            }
 
 #endif
         }
@@ -839,8 +869,9 @@ struct inp_read_t inp_read(
         printf("in inp_read, just read   %s", buffer);
 #endif
 
-        if (!buffer)
+        if (!buffer) {
             continue;
+        }
 
         /* OK -- now we have loaded the next line into 'buffer'.  Process it.
          */
@@ -983,14 +1014,13 @@ struct inp_read_t inp_read(
                     end->linenum = line_number++;
                     end->linenum_orig = line_number_inc++;
                 }
-                end->linenum =
-                        line_number++; /* SJB - renumber the last line */
-                end->linenum_orig =
-                        line_number_inc++; /* SJB - renumber the last line */
+                end->linenum = line_number++; /* SJB - renumber last line */
+                end->linenum_orig = line_number_inc++;
+                                         /* SJB - renumber the last line */
             }
 
             /* Fix the buffer up a bit. */
-            (void) strncpy(buffer + 1, "end of: ", 8);
+            (void) memcpy(buffer + 1, "end of: ", 8);
         } /*  end of .include handling  */
 
         /* loop through 'buffer' until end is reached. Make all letters lower
@@ -1099,8 +1129,8 @@ struct inp_read_t inp_read(
                     ;
             }
 
-            /* add Inp_Path to sourcepath variable */
-            if (cieq(buffer, "set") || cieq(buffer, "setcs")) {
+            /* add Inp_Path to buffer while keeping the sourcepath variable contents */
+            if (ciprefix("set", buffer)) {
                 char *p = strstr(buffer, "sourcepath");
                 if (p) {
                     p = strchr(buffer, ')');
@@ -1114,6 +1144,9 @@ struct inp_read_t inp_read(
                         for (s = buffer; *s && (*s != '\n'); s++)
                             ;
                     }
+                    else {
+                        fprintf(stderr, "Warning: no closing parens found in 'set sourcepath' statement\n");
+                    }
                 }
             }
 
@@ -1122,10 +1155,10 @@ struct inp_read_t inp_read(
             }
             *s = '\0'; /* Zap the newline. */
 
-            if ((s - 1) >= buffer &&
-                    *(s - 1) ==
-                            '\r') /* Zop the carriage return under windows */
-                *(s - 1) = '\0';
+            if ((s - 1) >= buffer && s[- 1] == '\r') {
+                /* Zap the carriage return under windows */
+                s[- 1] = '\0';
+            }
         }
 
         /* find the true .end command out of .endc, .ends, .endl, .end
@@ -1214,17 +1247,18 @@ struct inp_read_t inp_read(
 }
 
 
-static bool is_absolute_pathname(const char *p)
+
+/* Returns true if path is an absolute path and false if it is a
+ * relative path. No check is done for the existance of the path. */
+inline static bool is_absolute_pathname(const char *path)
 {
-#if defined(__MINGW32__) || defined(_MSC_VER)
-    /* /... or \... or D:\... or D:/... */
-    return p[0] == DIR_TERM || p[0] == DIR_TERM_LINUX ||
-            (isalpha_c(p[0]) && p[1] == ':' &&
-                    (p[2] == DIR_TERM_LINUX || p[2] == DIR_TERM));
+#ifdef _WIN32
+    return !PathIsRelativeA(path);
 #else
-    return p[0] == DIR_TERM;
+    return path[0] == DIR_TERM;
 #endif
-}
+} /* end of funciton is_absolute_pathname */
+
 
 
 #if 0
@@ -1232,7 +1266,7 @@ static bool is_absolute_pathname(const char *p)
 static bool
 is_plain_filename(const char *p)
 {
-#if defined(__MINGW32__) || defined(_MSC_VER)
+#if defined(_WIN32)
     return
         !strchr(p, DIR_TERM) &&
         !strchr(p, DIR_TERM_LINUX);
@@ -1245,19 +1279,27 @@ is_plain_filename(const char *p)
 #endif
 
 
-FILE *inp_pathopen(char *name, char *mode)
+FILE *inp_pathopen(const char *name, const char *mode)
 {
-    char *path = inp_pathresolve(name);
+    char * const path = inp_pathresolve(name);
 
     if (path) {
         FILE *fp = fopen(path, mode);
-        tfree(path);
+        txfree(path);
         return fp;
     }
 
-    return NULL;
-}
+    return (FILE *) NULL;
+} /* end of function inp_pathopen */
 
+
+/* for MultiByteToWideChar */
+#if defined(__MINGW32__) || defined(_MSC_VER)
+#ifndef EXT_ASC
+#undef BOOLEAN
+#include <windows.h>
+#endif
+#endif
 
 /*-------------------------------------------------------------------------*
   Look up the variable sourcepath and try everything in the list in order
@@ -1266,20 +1308,26 @@ FILE *inp_pathopen(char *name, char *mode)
 
 static char *inp_pathresolve(const char *name)
 {
-    char buf[BSIZE_SP];
     struct variable *v;
     struct stat st;
 
-#if defined(__MINGW32__) || defined(_MSC_VER)
+#if defined(_WIN32)
 
     /* If variable 'mingwpath' is set: convert mingw /d/... to d:/... */
     if (cp_getvar("mingwpath", CP_BOOL, NULL, 0) &&
             name[0] == DIR_TERM_LINUX && isalpha_c(name[1]) &&
             name[2] == DIR_TERM_LINUX) {
-        strcpy(buf, name);
+        DS_CREATE(ds, 100);
+        if (ds_cat_str(&ds, name) != 0) {
+            fprintf(stderr, "Unable to copy string while resolving path");
+            controlled_exit(EXIT_FAILURE);
+        }
+        char *const buf = ds_get_buf(&ds);
         buf[0] = buf[1];
         buf[1] = ':';
-        return inp_pathresolve(buf);
+        char * const resolved_path = inp_pathresolve(buf);
+        ds_free(&ds);
+        return resolved_path;
     }
 
 #endif
@@ -1287,59 +1335,91 @@ static char *inp_pathresolve(const char *name)
     /* just try it */
     if (stat(name, &st) == 0)
         return copy(name);
+	
+#if !defined(EXT_ASC) && (defined(__MINGW32__) || defined(_MSC_VER))
+    wchar_t wname[BSIZE_SP];
+    if (MultiByteToWideChar(CP_UTF8, 0, name, -1, wname, 2 * (int)strlen(name) + 1) == 0) {
+        fprintf(stderr, "UTF-8 to UTF-16 conversion failed with 0x%x\n", GetLastError());
+        fprintf(stderr, "%s could not be converted\n", name);
+        return NULL;
+    }
+    if (_waccess(wname, 0) == 0)
+        return copy(name);
+#endif	
 
     /* fail if this was an absolute filename or if there is no sourcepath var
      */
     if (is_absolute_pathname(name) ||
-            !cp_getvar("sourcepath", CP_LIST, &v, 0))
-        return NULL;
-
-    for (; v; v = v->va_next) {
-
-        switch (v->va_type) {
-            case CP_STRING:
-                cp_wstrip(v->va_string);
-                (void) sprintf(
-                        buf, "%s%s%s", v->va_string, DIR_PATHSEP, name);
-                break;
-            case CP_NUM:
-                (void) sprintf(buf, "%d%s%s", v->va_num, DIR_PATHSEP, name);
-                break;
-            case CP_REAL: /* This is foolish */
-                (void) sprintf(buf, "%g%s%s", v->va_real, DIR_PATHSEP, name);
-                break;
-            default:
-                fprintf(stderr,
-                        "ERROR: enumeration value `CP_BOOL' or `CP_LIST' not "
-                        "handled in inp_pathresolve\nAborting...\n");
-                controlled_exit(EXIT_FAILURE);
-                break;
-        }
-
-        if (stat(buf, &st) == 0)
-            return copy(buf);
+            !cp_getvar("sourcepath", CP_LIST, &v, 0)) {
+        return (char *) NULL;
     }
 
-    return (NULL);
-}
+    {
+        DS_CREATE(ds, 100);
+        for (; v; v = v->va_next) {
+            int rc_ds;
+            ds_clear(&ds); /* empty buffer */
+
+            switch (v->va_type) {
+                case CP_STRING:
+                    rc_ds = ds_cat_printf(&ds, "%s%s%s",
+                            v->va_string, DIR_PATHSEP, name);
+                    break;
+                case CP_NUM:
+                    rc_ds = ds_cat_printf(&ds, "%d%s%s",
+                            v->va_num, DIR_PATHSEP, name);
+                    break;
+                case CP_REAL: /* This is foolish */
+                    rc_ds = ds_cat_printf(&ds, "%g%s%s",
+                            v->va_real, DIR_PATHSEP, name);
+                    break;
+                default:
+                    fprintf(stderr,
+                            "ERROR: enumeration value `CP_BOOL' or `CP_LIST' "
+                            "not handled in inp_pathresolve\nAborting...\n");
+                    controlled_exit(EXIT_FAILURE);
+            }
+
+            if (rc_ds != 0) { /* unable to build string */
+                (void) fprintf(cp_err,
+                        "Unable to build path name in inp_pathresolve");
+                controlled_exit(EXIT_FAILURE);
+            }
+
+            /* Test if the file is found */
+            {
+                const char * const buf = ds_get_buf(&ds);
+                if (stat(buf, &st) == 0) {
+                    char * const buf_cpy = dup_string(
+                            buf, ds_get_length(&ds));
+                    ds_free(&ds);
+                    return buf_cpy;
+                }
+                /* Else contiue with next attempt */
+            }
+        } /* end of loop over linked variables */
+        ds_free(&ds);
+    } /* end of block trying to find a valid name */
+
+    return (char *) NULL;
+} /* end of function inp_pathresolve */
 
 
-static char *inp_pathresolve_at(char *name, char *dir)
+
+static char *inp_pathresolve_at(const char *name, const char *dir)
 {
-    char buf[BSIZE_SP], *end;
-
     /* if name is an absolute path name,
      *   or if we haven't anything to prepend anyway
      */
-
-    if (is_absolute_pathname(name) || !dir || !dir[0])
+    if (is_absolute_pathname(name) || !dir || !dir[0]) {
         return inp_pathresolve(name);
+    }
 
     if (name[0] == '~' && name[1] == '/') {
-        char *y = cp_tildexpand(name);
+        char * const y = cp_tildexpand(name);
         if (y) {
-            char *r = inp_pathresolve(y);
-            tfree(y);
+            char * const r = inp_pathresolve(y);
+            txfree(y);
             return r;
         }
     }
@@ -1350,28 +1430,49 @@ static char *inp_pathresolve_at(char *name, char *dir)
      * sourcepath
      */
 
-    strcpy(buf, ".");
+    {
+        DS_CREATE(ds, 100);
+        if (ds_cat_printf(&ds, ".%c%s", DIR_TERM, name) != 0) {
+            (void) fprintf(cp_err,
+                    "Unable to build \".\" path name in inp_pathresolve_at");
+            controlled_exit(EXIT_FAILURE);
+        }
+        char * const r = inp_pathresolve(ds_get_buf(&ds));
+        ds_free(&ds);
+        if (r != (char *) NULL) {
+            return r;
+        }
+    }
 
-    end = strchr(buf, '\0');
-    if (end[-1] != DIR_TERM)
-        *end++ = DIR_TERM;
+    {
+        DS_CREATE(ds, 100);
+        int rc_ds = 0;
+        rc_ds |= ds_cat_str(&ds, dir); /* copy the dir name */
+        const size_t n = ds_get_length(&ds); /* end of copied dir name */
 
-    strcpy(end, name);
+        /* Append a directory separator if not present already */
+        const char ch_last = n > 0 ? dir[n - 1] : '\0';
+        if (ch_last != DIR_TERM
+#ifdef _WIN32
+                && ch_last != DIR_TERM_LINUX
+#endif
+                ) {
+            rc_ds |= ds_cat_char(&ds, DIR_TERM);
+        }
+        rc_ds |= ds_cat_str(&ds, name); /* append the file name */
 
-    char *r = inp_pathresolve(buf);
-    if (r)
+        if (rc_ds != 0) {
+            (void) fprintf(cp_err, "Unable to build \"dir\" path name "
+                    "in inp_pathresolve_at");
+            controlled_exit(EXIT_FAILURE);
+        }
+
+        char * const r = inp_pathresolve(ds_get_buf(&ds));
+        ds_free(&ds);
         return r;
+    }
+} /* end of function inp_pathresolve_at */
 
-    strcpy(buf, dir);
-
-    end = strchr(buf, '\0');
-    if (end[-1] != DIR_TERM)
-        *end++ = DIR_TERM;
-
-    strcpy(end, name);
-
-    return inp_pathresolve(buf);
-}
 
 
 /*-------------------------------------------------------------------------*
@@ -1729,9 +1830,11 @@ static bool chk_for_line_continuation(char *line)
 //
 // change .macro --> .subckt
 //        .eom   --> .ends
-//        .subckt name 1 2 3 params: w=9u l=180n --> .subckt name 1 2 3 w=9u
-//        l=180n .subckt name (1 2 3) --> .subckt name 1 2 3 x1 (1 2 3) --> x1
-//        1 2 3 .param func1(x,y) = {x*y} --> .func func1(x,y) {x*y}
+//        .subckt name 1 2 3 params: w=9u l=180n -->
+//                               .subckt name 1 2 3 w=9u l=180n
+//        .subckt name (1 2 3) --> .subckt name 1 2 3
+//        x1 (1 2 3)      --> x1 1 2 3
+//        .param func1(x,y) = {x*y} --> .func func1(x,y) {x*y}
 
 static void inp_fix_macro_param_func_paren_io(struct card *card)
 {
@@ -1758,8 +1861,8 @@ static void inp_fix_macro_param_func_paren_io(struct card *card)
 
         if (ciprefix(".subckt", card->line) || ciprefix("x", card->line)) {
             /* remove () */
-            str_ptr = skip_non_ws(
-                    card->line); // skip over .subckt, instance name
+            str_ptr = skip_non_ws(card->line);
+                                        // skip over .subckt, instance name
             str_ptr = skip_ws(str_ptr);
             if (ciprefix(".subckt", card->line)) {
                 str_ptr = skip_non_ws(str_ptr); // skip over subckt name
@@ -1774,9 +1877,9 @@ static void inp_fix_macro_param_func_paren_io(struct card *card)
                     }
                     str_ptr++;
                 }
-                card->line = inp_remove_ws(
-                        card->line); /* remove the extra white spaces just
-                                        introduced */
+
+                /* Remove the extra white spaces just introduced */
+                card->line = inp_remove_ws(card->line);
             }
         }
 
@@ -1915,66 +2018,69 @@ static int is_a_modelname(const char *s)
     /* not beeing a valid number */
     testval = strtod(s, &st);
     /* conversion failed, so no number */
-    if (eq(s, st))
+    if (eq(s, st)) {
         return TRUE;
+    }
+
     /* test if we have a true number */
-    else if (*st == '\0' || isspace(*st))
+    if (*st == '\0' || isspace(*st)) {
         return FALSE;
-    else {
-        /* look for the scale factor (alphabetic) and skip it.
-         * INPevaluate will not do it because is does not swallow
-         * the scale factor from the string.
-         */
-        switch (*st) {
-            case 't':
-            case 'T':
-            case 'g':
-            case 'G':
-            case 'k':
-            case 'K':
-            case 'u':
-            case 'U':
-            case 'n':
-            case 'N':
-            case 'p':
-            case 'P':
-            case 'f':
-            case 'F':
-                st = st + 1;
-                break;
-            case 'm':
-            case 'M':
-                if (((st[1] == 'E') || (st[1] == 'e')) &&
-                        ((st[2] == 'G') || (st[2] == 'g'))) {
-                    st = st + 3; /* Meg */
-                }
-                else if (((st[1] == 'I') || (st[1] == 'i')) &&
-                        ((st[2] == 'L') || (st[2] == 'l'))) {
-                    st = st + 3; /* Mil */
-                }
-                else {
-                    st = st + 1; /* m, milli */
-                }
-                break;
-            default:
-                break;
-        }
-        /* test if we have a true scale factor */
-        if (*st == '\0' || isspace(*st))
-            return FALSE;
+    }
 
-        /* test if people use Ohms, F, H for RLC, like pF or uOhms */
-        if (ciprefix("ohms", st))
-            st = st + 4;
-        else if (ciprefix("farad", st))
-            st = st + 5;
-        else if (ciprefix("henry", st))
-            st = st + 5;
-        else if ((*st == 'f') || (*st == 'h'))
+    /* look for the scale factor (alphabetic) and skip it.
+     * INPevaluate will not do it because is does not swallow
+     * the scale factor from the string.
+     */
+    switch (*st) {
+        case 't':
+        case 'T':
+        case 'g':
+        case 'G':
+        case 'k':
+        case 'K':
+        case 'u':
+        case 'U':
+        case 'n':
+        case 'N':
+        case 'p':
+        case 'P':
+        case 'f':
+        case 'F':
             st = st + 1;
+            break;
+        case 'm':
+        case 'M':
+            if (((st[1] == 'E') || (st[1] == 'e')) &&
+                    ((st[2] == 'G') || (st[2] == 'g'))) {
+                st = st + 3; /* Meg */
+            }
+            else if (((st[1] == 'I') || (st[1] == 'i')) &&
+                    ((st[2] == 'L') || (st[2] == 'l'))) {
+                st = st + 3; /* Mil */
+            }
+            else {
+                st = st + 1; /* m, milli */
+            }
+            break;
+        default:
+            break;
+    }
+    /* test if we have a true scale factor */
+    if (*st == '\0' || isspace(*st))
+        return FALSE;
 
-        if (*st == '\0' || isspace(*st))
-            return FALSE;
+    /* test if people use Ohms, F, H for RLC, like pF or uOhms */
+    if (ciprefix("ohms", st))
+        st = st + 4;
+    else if (ciprefix("farad", st))
+        st = st + 5;
+    else if (ciprefix("henry", st))
+        st = st + 5;
+    else if ((*st == 'f') || (*st == 'h'))
+        st = st + 1;
+
+    if (*st == '\0' || isspace(*st)) {
+        return FALSE;
     }
 
     /* token starts with non alphanum character */
@@ -2213,7 +2319,7 @@ static void comment_out_unused_subckt_models(struct card *start_card)
         }
 
         if (remove_subckt)
-            *line = '*';
+            *line = '*'; /* make line a comment */
 #if 0
         else if (has_models &&
                 (ciprefix(".model", line) || ciprefix(".cmodel", line))) {
@@ -2306,7 +2412,7 @@ static char *inp_spawn_brace(char *s)
 
 /*-------------------------------------------------------------------------*
   removes  " " quotes, returns lower case letters,
-  replaces non-printable characterss with '_', however if
+  replaces non-printable characters with '_', however if
   non-printable character is the only character in a line,
   replace it by '*'
   *-------------------------------------------------------------------------*/
@@ -2322,11 +2428,6 @@ void inp_casefix(char *string)
     }
     if (string)
         while (*string) {
-#ifdef HAS_ASCII
-            /* ((*string) & 0177): mask off all but the first seven bits,
-             * 0177: octal */
-            *string = (char) strip(*string);
-#endif
             if (*string == '"') {
                 *string++ = ' ';
                 while (*string && *string != '"')
@@ -2378,8 +2479,7 @@ static void inp_stripcomments_deck(struct card *c, bool cf)
  * Comments on a continuation line (i.e. line begining with '+') are allowed
  * and are removed before lines are stitched.
  * Lines that contain only an end-of-line comment with or without leading
- white
- * space are also allowed.
+ * white space are also allowed.
 
  If there is only white space before the end-of-line comment the
  the whole line is converted to a normal comment line (i.e. one that
@@ -2721,7 +2821,7 @@ static void inp_remove_excess_ws(struct card *c)
 }
 
 
-static struct card *expand_section_ref(struct card *c, char *dir_name)
+static struct card *expand_section_ref(struct card *c, const char *dir_name)
 {
     char *line = c->line;
 
@@ -2822,7 +2922,7 @@ static struct card *expand_section_ref(struct card *c, char *dir_name)
  *    just those references occuring in the given library section definition
  */
 
-static void expand_section_references(struct card *c, char *dir_name)
+static void expand_section_references(struct card *c, const char *dir_name)
 {
     for (; c; c = c->nextcard)
         if (ciprefix(".lib", c->line))
@@ -3403,6 +3503,14 @@ static char *inp_expand_macro_in_str(struct function_env *env, char *str)
     char *orig_ptr = str, *search_ptr = str, *orig_str = copy(str);
     char keep;
 
+    /* If we have '.model mymod mdname(params)', don't treat this as a function,
+    but skip '.model mymod mdname' and only then start searching for functions. */
+    if (ciprefix(".model", search_ptr)){
+        search_ptr = nexttok(search_ptr);
+        search_ptr = nexttok(search_ptr);
+        char *end;
+        findtok_noparen(&search_ptr, &search_ptr, &end);
+    }
     // printf("%s: enter(\"%s\")\n", __FUNCTION__, str);
     while ((open_paren_ptr = strchr(search_ptr, '(')) != NULL) {
 
@@ -3986,7 +4094,7 @@ static int get_number_terminals(char *c)
                 char *inst = gettok_instance(&c);
                 strncpy(nam_buf, inst, sizeof(nam_buf) - 1);
                 txfree(inst);
-                if (strstr(nam_buf, "off") || strchr(nam_buf, '='))
+                if (strstr(nam_buf, "off") || strchr(nam_buf, '=') || strstr(nam_buf, "tnodeout") || strstr(nam_buf, "thermal"))
                     break;
                 i++;
             }
@@ -4630,7 +4738,7 @@ static void inp_compat(struct card *card)
                     NULL) {
                 if (str_ptr[5] == '=')
                     *str_ptr++ = ' ';
-                strncpy(str_ptr, " vol=", 5);
+                memcpy(str_ptr, " vol=", 5);
             }
             /* Exxx n1 n2 TABLE {expression} = (x0, y0) (x1, y1) (x2, y2)
                -->
@@ -4759,11 +4867,11 @@ static void inp_compat(struct card *card)
                 }
 
                 // Exxx  n1 n2 int1 0 1
-                ckt_array[0] = tprintf("%s %s %s %s_int1 0 1", title_tok,
-                        node1, node2, title_tok);
+                ckt_array[0] = tprintf("%s %s %s %s_int1 0 1",
+                        title_tok, node1, node2, title_tok);
                 // BExxx int1 0 V = {equation}
-                ckt_array[1] = tprintf("b%s %s_int1 0 v = %s", title_tok,
-                        title_tok, str_ptr);
+                ckt_array[1] = tprintf("b%s %s_int1 0 v = %s",
+                        title_tok, title_tok, str_ptr);
 
                 // comment out current variable e line
                 *(card->line) = '*';
@@ -4788,7 +4896,7 @@ static void inp_compat(struct card *card)
                     NULL) {
                 if (str_ptr[5] == '=')
                     *str_ptr++ = ' ';
-                strncpy(str_ptr, " cur=", 5);
+                memcpy(str_ptr, " cur=", 5);
             }
 
             /* Gxxx n1 n2 TABLE {expression} = (x0, y0) (x1, y1) (x2, y2)
@@ -4820,8 +4928,8 @@ static void inp_compat(struct card *card)
                 }
                 else
                     m_token = copy("1");
-                ckt_array[0] = tprintf("%s %s %s %s_int1 0 %s", title_tok,
-                        node1, node2, title_tok, m_token);
+                ckt_array[0] = tprintf("%s %s %s %s_int1 0 %s",
+                        title_tok, node1, node2, title_tok, m_token);
                 // skip "table"
                 cut_line = skip_ws(cut_line);
                 if (!ciprefix("table", cut_line)) {
@@ -4834,9 +4942,8 @@ static void inp_compat(struct card *card)
                 if (*cut_line == '=')
                     *cut_line++ = ' ';
                 // get the expression
-                str_ptr = gettok_char(&cut_line, '{', FALSE, FALSE);
-                expression = gettok_char(
-                        &cut_line, '}', TRUE, TRUE); /* expression */
+                str_ptr =  gettok_char(&cut_line, '{', FALSE, FALSE);
+                expression = gettok_char(&cut_line, '}', TRUE, TRUE);
                 if (!expression || !str_ptr) {
                     fprintf(stderr, "Error: bad syntax in line %d\n  %s\n",
                             card->linenum_orig, card->line);
@@ -4936,11 +5043,11 @@ static void inp_compat(struct card *card)
                 // Gxxx  n1 n2 int1 0 1
                 // or
                 // Gxxx  n1 n2 int1 0 m='expr'
-                ckt_array[0] = tprintf("%s %s %s %s_int1 0 %s", title_tok,
-                        node1, node2, title_tok, m_token);
+                ckt_array[0] = tprintf("%s %s %s %s_int1 0 %s",
+                        title_tok, node1, node2, title_tok, m_token);
                 // BGxxx int1 0 V = {equation}
-                ckt_array[1] = tprintf("b%s %s_int1 0 v = %s", title_tok,
-                        title_tok, str_ptr);
+                ckt_array[1] = tprintf("b%s %s_int1 0 v = %s",
+                        title_tok, title_tok, str_ptr);
 
                 // comment out current variable g line
                 *(card->line) = '*';
@@ -4980,14 +5087,14 @@ static void inp_compat(struct card *card)
                 vbFxxx int1 0 0
                 */
                 // Fxxx n1 n2 VBFxxx -1
-                ckt_array[0] = tprintf("%s %s %s vb%s -1", title_tok, node1,
-                        node2, title_tok);
+                ckt_array[0] = tprintf("%s %s %s vb%s -1",
+                        title_tok, node1, node2, title_tok);
                 // BFxxx BFxxx_int1 0 I = I(vnam)*{equation}
                 ckt_array[1] = tprintf("b%s %s_int1 0 i = i(%s) * (%s)",
                         title_tok, title_tok, vnamstr, equastr);
                 // VBFxxx int1 0 0
-                ckt_array[2] =
-                        tprintf("vb%s %s_int1 0 dc 0", title_tok, title_tok);
+                ckt_array[2] = tprintf("vb%s %s_int1 0 dc 0",
+                        title_tok, title_tok);
                 // comment out current variable f line
                 *(card->line) = '*';
                 // insert new three lines immediately after current line
@@ -5026,8 +5133,8 @@ static void inp_compat(struct card *card)
                 vbHxxx int1 0 0
                 */
                 // Hxxx n1 n2 VBHxxx -1
-                ckt_array[0] = tprintf("%s %s %s vb%s -1", title_tok, node1,
-                        node2, title_tok);
+                ckt_array[0] = tprintf("%s %s %s vb%s -1",
+                        title_tok, node1, node2, title_tok);
                 // BHxxx BHxxx_int1 0 I = I(vnam)*{equation}
                 ckt_array[1] = tprintf("b%s %s_int1 0 i = i(%s) * (%s)",
                         title_tok, title_tok, vnamstr, equastr);
@@ -5323,8 +5430,8 @@ static void inp_compat(struct card *card)
                 }
             }
             // Fxxx  n-aux 0  Bxxx  1
-            ckt_array[0] = tprintf(
-                    "f%s %s_int2 0 b%s -1", title_tok, title_tok, title_tok);
+            ckt_array[0] = tprintf("f%s %s_int2 0 b%s -1",
+                    title_tok, title_tok, title_tok);
             // Lxxx  n-aux 0  1
             ckt_array[1] = tprintf("l%s %s_int2 0 1", title_tok, title_tok);
             // Bxxx  n1 n2  V = v(n-aux) * equation
@@ -5378,13 +5485,13 @@ static void inp_compat(struct card *card)
              * + <TD=td> <FROM=val> <TO=val>
              * + <CROSS=# | CROSS=LAST> <RISE=#|RISE=LAST> <FALL=#|FALL=LAST>
              *
-             * .MEASURE {DC|AC|TRAN} result FIND out_variable WHEN
-             out_variable2=val
+             * .MEASURE {DC|AC|TRAN} result FIND out_variable
+             * + WHEN out_variable2=val
              * + <TD=td> <FROM=val> <TO=val>
              * + <CROSS=# | CROSS=LAST> <RISE=#|RISE=LAST> <FALL=#|FALL=LAST>
              *
-             * .MEASURE {DC|AC|TRAN} result FIND out_variable WHEN
-             out_variable2=out_variable3
+             * .MEASURE {DC|AC|TRAN} result FIND out_variable
+             * + WHEN out_variable2=out_variable3
              * + <TD=td>
              * + <CROSS=# | CROSS=LAST> <RISE=#|RISE=LAST> <FALL=#|FALL=LAST>
              *
@@ -5392,7 +5499,7 @@ static void inp_compat(struct card *card)
              * + <FROM=val> <TO=val>
              *
              * .MEASURE {DC|AC|TRAN} result {AVG|MIN|MAX|MIN_AT|MAX_AT|PP|RMS}
-             out_variable
+             * + out_variable
              * + <TD=td> <FROM=val> <TO=val>
              *
              * .MEASURE {DC|AC|TRAN} result INTEG<RAL> out_variable
@@ -5400,22 +5507,20 @@ static void inp_compat(struct card *card)
              *
              * .MEASURE {DC|AC|TRAN} result DERIV<ATIVE> out_variable AT=val
              *
-             * .MEASURE {DC|AC|TRAN} result DERIV<ATIVE> out_variable WHEN
-             out_variable2=val
+             * .MEASURE {DC|AC|TRAN} result DERIV<ATIVE> out_variable
+             * + WHEN out_variable2=val
              * + <TD=td>
              * + <CROSS=# | CROSS=LAST> <RISE=#|RISE=LAST> <FALL=#|FALL=LAST>
              *
-             * .MEASURE {DC|AC|TRAN} result DERIV<ATIVE> out_variable WHEN
-             out_variable2=out_variable3
+             * .MEASURE {DC|AC|TRAN} result DERIV<ATIVE> out_variable
+             * + WHEN out_variable2=out_variable3
              * + <TD=td>
              * + <CROSS=# | CROSS=LAST> <RISE=#|RISE=LAST> <FALL=#|FALL=LAST>
 
              The user may set any out_variable to par(' expr ').
              We have to replace this by v(pa_xx) and generate a B source line.
 
-             *
-             -----------------------------------------------------------------
-           */
+             * ------------------------------------------------------------ */
             if (ciprefix(".meas", curr_line)) {
                 if (strstr(curr_line, "par(") == NULL)
                     continue;
@@ -5436,15 +5541,16 @@ static void inp_compat(struct card *card)
                         // find expression
                         beg_ptr = end_ptr = str_ptr + 5;
                         while ((*end_ptr != ' ') && (*end_ptr != '=') &&
-                                (*end_ptr != '\0'))
+                                (*end_ptr != '\0')) {
                             end_ptr++;
+                        }
                         exp_ptr = copy_substring(beg_ptr, end_ptr - 2);
                         cut_line = str_ptr;
                         // generate node
                         out_ptr = tprintf("pa_%02d", (int) pai);
                         // Bout_ptr  out_ptr 0  V = v(expr_ptr)
-                        ckt_array[pai] = tprintf(
-                                "b%s %s 0 v = %s", out_ptr, out_ptr, exp_ptr);
+                        ckt_array[pai] = tprintf("b%s %s 0 v = %s",
+                                out_ptr, out_ptr, exp_ptr);
                         ckt_array[++pai] = NULL;
                         // length of the replacement V(out_ptr)
                         del_ptr = copy_ptr = tprintf("v(%s)", out_ptr);
@@ -5472,8 +5578,8 @@ static void inp_compat(struct card *card)
                         // generate node
                         out_ptr = tprintf("pa_%02d", (int) pai);
                         // Bout_ptr  out_ptr 0  V = v(expr_ptr)
-                        ckt_array[pai] = tprintf(
-                                "b%s %s 0 v = %s", out_ptr, out_ptr, exp_ptr);
+                        ckt_array[pai] = tprintf("b%s %s 0 v = %s",
+                                out_ptr, out_ptr, exp_ptr);
                         ckt_array[++pai] = NULL;
                         // length of the replacement V(out_ptr)
                         del_ptr = copy_ptr = tprintf("v(%s)", out_ptr);
@@ -5539,8 +5645,8 @@ static void inp_compat(struct card *card)
                         // generate node
                         out_ptr = tprintf("pa_%02d", (int) pai);
                         // Bout_ptr  out_ptr 0  V = v(expr_ptr)
-                        ckt_array[pai] = tprintf(
-                                "b%s %s 0 v = %s", out_ptr, out_ptr, exp_ptr);
+                        ckt_array[pai] = tprintf("b%s %s 0 v = %s",
+                                out_ptr, out_ptr, exp_ptr);
                         ckt_array[++pai] = NULL;
                         // length of the replacement V(out_ptr)
                         del_ptr = copy_ptr = tprintf("%s", out_ptr);
@@ -5558,7 +5664,7 @@ static void inp_compat(struct card *card)
                         tfree(out_ptr);
                     }
                     // or we have '={par({ ... })}'
-                    else if (ciprefix("={par({", (str_ptr - 2))) {
+                    else if (ciprefix("={par({", str_ptr - 2)) {
 
                         // find myoutput
                         beg_ptr = end_ptr = str_ptr - 2;
@@ -5572,8 +5678,8 @@ static void inp_compat(struct card *card)
                             end_ptr++;
                         exp_ptr = copy_substring(beg_ptr, end_ptr - 3);
                         // Bout_ptr  out_ptr 0  V = v(expr_ptr)
-                        ckt_array[pai] = tprintf(
-                                "b%s %s 0 v = %s", out_ptr, out_ptr, exp_ptr);
+                        ckt_array[pai] = tprintf("b%s %s 0 v = %s",
+                                out_ptr, out_ptr, exp_ptr);
                         ckt_array[++pai] = NULL;
                         // length of the replacement V(out_ptr)
                         del_ptr = copy_ptr = tprintf("%s", out_ptr);
@@ -5807,15 +5913,17 @@ static bool inp_temper_compat(struct card *card)
  * and other keywords like TEMPER. --> Only parameter replacement in numparam
  */
 
-static char *inp_modify_exp(char *expr)
+static char *inp_modify_exp(/* NOT CONST */ char *expr)
 {
     char *s;
     wordlist *wl = NULL, *wlist = NULL;
 
-    /* scan the expression and remove all '{' and '}' */
-    for (s = expr; *s; s++)
-        if ((*s == '{') || (*s == '}'))
+    /* Scan the expression and replace all '{' and '}' with ' ' */
+    for (s = expr; *s; s++) {
+        if ((*s == '{') || (*s == '}')) {
             *s = ' ';
+        }
+    }
 
     /* scan the expression */
     s = expr;
@@ -5860,8 +5968,9 @@ static char *inp_modify_exp(char *expr)
         else if ((c == '>') || (c == '<') || (c == '!') || (c == '=')) {
             /* >=, <=, !=, ==, <>, ... */
             char *beg = s++;
-            if ((*s == '=') || (*s == '<') || (*s == '>'))
+            if ((*s == '=') || (*s == '<') || (*s == '>')) {
                 s++;
+            }
             wl->wl_word = copy_substring(beg, s);
         }
         else if ((c == '|') || (c == '&')) {
@@ -5876,8 +5985,9 @@ static char *inp_modify_exp(char *expr)
             int i = 0;
 
             if (((c == 'v') || (c == 'i')) && (s[1] == '(')) {
-                while (*s != ')')
+                while (*s != ')') {
                     buf[i++] = *s++;
+                }
                 buf[i++] = *s++;
                 buf[i] = '\0';
                 wl->wl_word = copy(buf);
@@ -5927,8 +6037,9 @@ static char *inp_modify_exp(char *expr)
             double dvalue = INPevaluate(&s, &error1, 0);
             wl->wl_word = tprintf("%18.10e", dvalue);
             /* skip the `unit', FIXME INPevaluate() should do this */
-            while (isalpha_c(*s))
+            while (isalpha_c(*s)) {
                 s++;
+            }
         }
         else { /* strange char */
             printf("Preparing expression for numparam\nWhat is this?\n%s\n",
@@ -6257,9 +6368,11 @@ static void inp_fix_temper_in_param(struct card *deck)
         sub_count[j] = 0;
 
     /* first pass: determine all .param with temper inside and replace by
-       .func .param xxx1 = 'temper + 25' will become .func xxx1() 'temper +
-       25'
-    */
+     * .func
+     * .param xxx1 = 'temper + 25'
+     * will become
+     * .func xxx1() 'temper + 25'
+     */
     card = deck;
     for (; card; card = card->nextcard) {
 
@@ -6812,13 +6925,19 @@ static void inp_quote_params(struct card *c, struct card *end_c,
    Assemble all other tokens in a wordlist, and flatten it
    to become the new .model line.
 */
-static void inp_vdmos_model(struct card *deck)
+static int inp_vdmos_model(struct card *deck)
 {
+#define MODNUMBERS 256
+
     struct card *card;
+    struct card *vmodels[MODNUMBERS]; /* list of pointers to vdmos model cards */
+    int j = 0;
+    vmodels[0] = NULL;
+
     for (card = deck; card; card = card->nextcard) {
 
-        char *curr_line, *cut_line, *token, *new_line;
-        wordlist *wl = NULL, *wlb;
+        char* curr_line, * cut_line, * token, * new_line;
+        wordlist* wl = NULL, * wlb;
 
         curr_line = cut_line = card->line;
 
@@ -6827,10 +6946,10 @@ static void inp_vdmos_model(struct card *deck)
             wl_append_word(&wl, &wl, copy_substring(curr_line, cut_line));
             wlb = wl;
             if (strstr(cut_line, "pchan")) {
-                wl_append_word(NULL, &wl, "vdmosp (");
+                wl_append_word(NULL, &wl, copy("vdmosp ("));
             }
             else {
-                wl_append_word(NULL, &wl, "vdmosn (");
+                wl_append_word(NULL, &wl, copy("vdmosn ("));
             }
             cut_line = cut_line + 5;
 
@@ -6841,24 +6960,83 @@ static void inp_vdmos_model(struct card *deck)
             while (cut_line && *cut_line) {
                 token = gettok_model(&cut_line);
                 if (!ciprefix("pchan", token) && !ciprefix("ron=", token) &&
-                        !ciprefix("vds=", token) && !ciprefix("qg=", token) &&
-                        !ciprefix("mfg=", token) && !ciprefix("nchan", token))
+                    !ciprefix("vds=", token) && !ciprefix("qg=", token) &&
+                    !ciprefix("mfg=", token) && !ciprefix("nchan", token))
                     wl_append_word(NULL, &wl, token);
+                else
+                    tfree(token);
                 if (*cut_line == ')') {
-                    wl_append_word(NULL, &wl, ")");
+                    wl_append_word(NULL, &wl, copy(")"));
                     break;
                 }
             }
             new_line = wl_flatten(wlb);
             tfree(card->line);
             card->line = new_line;
+            wl_free(wlb);
+
+            /* add model card pointer to list */
+            vmodels[j] = card;
+            j++;
+            if (j == MODNUMBERS) {
+                vmodels[j - 1] = NULL;
+                continue;
+            }
+            vmodels[j] = NULL;
         }
     }
+
+    /* we don't have vdmos models, so return */
+    if (vmodels[0] == NULL)
+        return 0;
+    if (j == MODNUMBERS)
+        fprintf(cp_err, "Warning: Syntax check for VDMOS instances is limited to %d .model cards\n", MODNUMBERS);
+
+    for (card = deck; card; card = card->nextcard) {
+        /* we have a VDMOS instance line with 'thermal' flag and thus need exactly 5 nodes
+         */
+        int i;
+        char *curr_line = card->line;
+        if (curr_line[0] == 'm' && strstr(curr_line, "thermal")) {
+            /* move to model name */
+            for (i = 0; i < 6; i++)
+                curr_line = nexttok(curr_line);
+            if (!curr_line || !*curr_line) {
+                fprintf(cp_err,
+                    "Error: We need exactly 5 nodes\n"
+                    "    drain, gate, source, tjunction, tcase\n"
+                    "    in VDMOS instance line with thermal model\n"
+                    "    %s\n", card->line);
+                return 1;
+            }
+            /* next token is the model name of instance */
+            char* instmodname = gettok(&curr_line);
+            i = 0;
+            while (vmodels[i]) {
+                char* mod = vmodels[i]->line;
+                mod = nexttok(mod); /* skip .model */
+                if (ciprefix(instmodname, mod)) {
+                    tfree(instmodname);
+                    return 0;
+                }
+                i++;
+            }
+            fprintf(cp_err,
+                "Error: We need exactly 5 nodes\n"
+                "    drain, gate, source, tjunction, tcase\n"
+                "    in VDMOS instance line with thermal model\n"
+                "    %s\n", card->line);
+            tfree(instmodname);
+            return 1;
+        }
+    }
+    return 0;
 }
 
 
 /* storage for devices which get voltage source added */
-struct replace_currm {
+struct replace_currm
+{
     struct card *s_start;
     struct card *cline;
     char *rtoken;
@@ -6989,8 +7167,9 @@ static void inp_meas_current(struct card *deck)
     }
 
     /* return if we did not find any i( */
-    if (rep == NULL)
+    if (rep == NULL) {
         return;
+    }
 
     /* scan through all the devices, search for xyz, modify node 1 by adding
        _vmeas, add a line with zero voltage v_xyz, having original node 1 and
@@ -7069,8 +7248,8 @@ static void inp_meas_current(struct card *deck)
                 /* Add _vmeas only once to first device node.
                    Continue if we already have modified device "tok" */
                 if (!strstr(node1, "_vmeas")) {
-                    new_line = tprintf(
-                            "%s %s_vmeas_%d %s", tok, node1, sn, curr_line);
+                    new_line = tprintf("%s %s_vmeas_%d %s",
+                            tok, node1, sn, curr_line);
                     tfree(card->line);
                     card->line = new_line;
                 }
@@ -7079,8 +7258,8 @@ static void inp_meas_current(struct card *deck)
                 /* We have already added a line v_xyz to the deck */
                 if (!ciprefix(new_tok, card->nextcard->line)) {
                     /* add new line */
-                    new_line = tprintf(
-                            "%s %s %s_vmeas_%d 0", new_tok, node1, node1, sn);
+                    new_line = tprintf("%s %s %s_vmeas_%d 0",
+                            new_tok, node1, node1, sn);
                     /* insert new_line after card->line */
                     insert_new_line(card, new_line, card->linenum + 1, 0);
                 }
@@ -7102,12 +7281,13 @@ static void inp_meas_current(struct card *deck)
 }
 
 /* replace the E source TABLE function by a B source pwl
-   (used by ST OpAmps and comparators).
-   E_RO_3 VB_3 VB_4  VALUE={ TABLE( V(VCCP,VCCN), 2 , 35 , 3.3 , 15 , 5 , 10
-   )*I(VreadIo)} will become BE_RO_3_1 TABLE_NEW_1 0 v = pwl( V(VCCP,VCCN), 2
-   , 35 , 3.3 , 15 , 5 , 10 ) E_RO_3 VB_3 VB_4  VALUE={
-   V(TABLE_NEW_1)*I(VreadIo)}
-*/
+ * (used by ST OpAmps and comparators).
+ * E_RO_3 VB_3 VB_4  VALUE={ TABLE( V(VCCP,VCCN), 2 , 35 , 3.3 , 15 , 5 , 10
+ *         )*I(VreadIo)}
+ * will become
+ * BE_RO_3_1 TABLE_NEW_1 0 v = pwl( V(VCCP,VCCN), 2 , 35 , 3.3 , 15 , 5 , 10
+ *        ) E_RO_3 VB_3 VB_4  VALUE={ V(TABLE_NEW_1)*I(VreadIo)}
+ */
 static void replace_table(struct card *startcard)
 {
     struct card *card;
@@ -7124,8 +7304,8 @@ static void replace_table(struct card *startcard)
                     /* get the table function */
                     char *tabfun = gettok_char(&ftablebeg, ')', TRUE, TRUE);
                     /* the new e line */
-                    char *neweline = tprintf(
-                            "%s v(table_new_%d)%s", begline, numb, ftablebeg);
+                    char *neweline = tprintf("%s v(table_new_%d)%s",
+                            begline, numb, ftablebeg);
                     char *newbline =
                             tprintf("btable_new_%d table_new_%d 0 v=pwl%s",
                                     numb, numb, tabfun + 5);
@@ -7182,8 +7362,8 @@ static struct card *find_model(struct card *startcard,
                     controlled_exit(1);
                 }
                 /* we have got it */
-                char *newmodcard = tprintf(".model %s %s %s%s", newmname,
-                        newmtype, origmodline, endstr);
+                char *newmodcard = tprintf(".model %s %s %s%s",
+                        newmname, newmtype, origmodline, endstr);
                 char *tmpstr = strstr(newmodcard, ")(");
                 if (tmpstr) {
                     tmpstr[0] = ' ';
@@ -7206,7 +7386,7 @@ static struct card *find_model(struct card *startcard,
 }
 
 /* do the .model replacement required by ako (a kind of)
- * PSPICE does not support ested .subckt definitions, so
+ * PSPICE does not support nested .subckt definitions, so
  * a simple structure is needed: search for ako:modelname,
  * then for modelname in the subcircuit or in the top level.
  * .model qorig npn (BF=48 IS=2e-7)
@@ -7358,14 +7538,23 @@ static bool del_models(struct vsmodels *vsmodel)
 * add predefined params TEMP, VT, GMIN to beginning of deck
 * add predefined params TEMP, VT, GMIN to beginning of each .subckt call
 * add .functions limit, pwr, pwrs, stp, if, int
-* replace
+* replace vswitch part S
   S1 D S DG GND SWN
- .MODEL SWN VSWITCH(VON = { 0.55 } VOFF = { 0.49 } RON = { 1 / (2 * M*(W /
-LE)*(KPN / 2) * 10) }  ROFF = { 1G })
+ .MODEL SWN VSWITCH(VON = { 0.55 } VOFF = { 0.49 }
+     RON = { 1 / (2 * M*(W / LE)*(KPN / 2) * 10) }  ROFF = { 1G })
 * by
   as1 %vd(DG GND) % gd(D S) aswn
   .model aswn aswitch(cntl_off={0.49} cntl_on={0.55} r_off={1G}
   + r_on={ 1 / (2 * M*(W / LE)*(KPN / 2) * 10) } log = TRUE)
+* replace vsitch part S_ST
+  S1 D S DG GND S_ST
+ .MODEL S_ST VSWITCH(VT = { 1.5 } VH = { 0.s }
+     RON = { 1 / (2 * M*(W / LE)*(KPN / 2) * 10) }  ROFF = { 1G })
+* by the classical voltage controlled ngspice switch
+  S1 D S DG GND SWN
+ .MODEL S_ST SW(VT = { 1.5 } VH = { 0.s }
+     RON = { 1 / (2 * M*(W / LE)*(KPN / 2) * 10) }  ROFF = { 1G })
+  switch parameter td is not yet supported
 * replace & by &&
 * replace | by ||
 * in R instance, replace TC = xx1, xx2 by TC1=xx1 TC2=xx2
@@ -7398,9 +7587,9 @@ static struct card *pspice_compat(struct card *oldcard)
     /* add funcs limit, pwr, pwrs, stp, if, int */
     new_str = copy(".func limit(x, a, b) { min(max(x, a), b) }");
     nextcard = insert_new_line(nextcard, new_str, 4, 0);
-    new_str = copy(".func pwr(x, a) { abs(x) ** a }");
+    new_str = copy(".func pwr(x, a) { pow(x, a) }");
     nextcard = insert_new_line(nextcard, new_str, 5, 0);
-    new_str = copy(".func pwrs(x, a) { sgn(x) * pwr(x, a) }");
+    new_str = copy(".func pwrs(x, a) { sgn(x) * pow(x, a) }");
     nextcard = insert_new_line(nextcard, new_str, 6, 0);
     new_str = copy(".func stp(x) { u(x) }");
     nextcard = insert_new_line(nextcard, new_str, 7, 0);
@@ -7468,8 +7657,8 @@ static struct card *pspice_compat(struct card *oldcard)
                 tctok[-1] = '\0';
                 char *newstring;
                 if (tc1 && tc2)
-                    newstring =
-                            tprintf("%s tc1=%s tc2=%s", cut_line, tc1, tc2);
+                    newstring = tprintf("%s tc1=%s tc2=%s",
+                            cut_line, tc1, tc2);
                 else if (tc1)
                     newstring = tprintf("%s tc1=%s", cut_line, tc1);
                 else {
@@ -7487,7 +7676,7 @@ static struct card *pspice_compat(struct card *oldcard)
         }
     }
 
-    /* replace & with && and | with || and *# with * # */
+    /* replace & with && , | with || , *# with * # , and ~ with ! */
     for (card = newcard; card; card = card->nextcard) {
         char *t;
         char *cut_line = card->line;
@@ -7548,6 +7737,18 @@ static struct card *pspice_compat(struct card *oldcard)
                     break;
                 else
                     t = strstr(tt, "|");
+            }
+        }
+        /* We may have '~' in path names or A devices */
+        char *firsttok = nexttok(card->line); /* skip over whitespaces */
+        if (ciprefix(".inc", firsttok) || ciprefix(".lib", firsttok) ||
+                ciprefix("A", firsttok))
+            continue;
+
+        if ((t = strstr(card->line, "~")) != NULL) {
+            while (t) {
+                *t = '!';
+                t = strstr(t, "~");
             }
         }
     }
@@ -7616,8 +7817,9 @@ static struct card *pspice_compat(struct card *oldcard)
                 while (*cut_line && !isspace(*cut_line))
                     if (!isdigit(*cut_line++))
                         is_node4 = FALSE; // already model name
-                if (is_node4)
+                if (is_node4) {
                     cut_line = nexttok(cut_line); // model name
+                }
             }
             if (cut_line && *cut_line &&
                     atof(cut_line) > 0.0) { // size of area is a real number
@@ -7664,19 +7866,31 @@ static struct card *pspice_compat(struct card *oldcard)
         }
     }
 
-    /* replace
-    * S1 D S DG GND SWN
-    * .MODEL SWN VSWITCH ( VON = {0.55} VOFF = {0.49}
-    RON={1/(2*M*(W/LE)*(KPN/2)*10)}  ROFF={1G} )
-    * by
-    * a1 %v(DG) %gd(D S) swa
-    * .MODEL SWA aswitch(cntl_off=0.49 cntl_on=0.55 r_off=1G
-    r_on={1/(2*M*(W/LE)*(KPN/2)*10)} log=TRUE)
+    /* if vswitch part s, replace
+     * S1 D S DG GND SWN
+     * .MODEL SWN VSWITCH ( VON = {0.55} VOFF = {0.49}
+     *         RON={1/(2*M*(W/LE)*(KPN/2)*10)}  ROFF={1G} )
+     * by
+     * a1 %v(DG) %gd(D S) swa
+     * .MODEL SWA aswitch(cntl_off=0.49 cntl_on=0.55 r_off=1G
+     *         r_on={1/(2*M*(W/LE)*(KPN/2)*10)} log=TRUE)
+     *
+     * if vswitch part s_st, don't replace instance, only model
+     * replace
+     * S1 D S DG GND S_ST
+     * .MODEL S_ST VSWITCH(VT = { 1.5 } VH = { 0.s }
+           RON = { 1 / (2 * M*(W / LE)*(KPN / 2) * 10) }  ROFF = { 1G })
+     * by the classical voltage controlled ngspice switch
+     * S1 D S DG GND S_ST
+     * .MODEL S_ST SW(VT = { 1.5 } VH = { 0.s }
+             RON = { 1 / (2 * M*(W / LE)*(KPN / 2) * 10) }  ROFF = { 1G })
+     * vswitch delay parameter td is not yet supported
 
-    * simple hierachy, as nested subcircuits are not allowed in PSPICE */
+     * simple hierachy, as nested subcircuits are not allowed in PSPICE */
 
     /* first scan: find the vswitch models, transform them and put them into a
      * list */
+    bool have_vt = FALSE, have_vh = FALSE;
     for (card = newcard; card; card = card->nextcard) {
         char *str;
         static struct card *subcktline = NULL;
@@ -7737,12 +7951,28 @@ static struct card *pspice_compat(struct card *oldcard)
             else
                 /* vswitch defined without parens */
                 modpar[3] = copy(equalptr[3]);
-            tfree(card->line);
-            /* replace VON by cntl_on, VOFF by cntl_off, RON by r_on, and ROFF
-             * by r_off */
-            rep_spar(modpar);
-            card->line = tprintf(".model a%s aswitch(%s %s %s %s  log=TRUE)",
-                    modname, modpar[0], modpar[1], modpar[2], modpar[3]);
+
+            /* check if we have parameters VT and VH */
+            for (i = 0; i < 4; i++) {
+                if (ciprefix("vh", modpar[i]))
+                    have_vh = TRUE;
+                if (ciprefix("vt", modpar[i]))
+                    have_vt = TRUE;
+            }
+            if (have_vh && have_vt) {
+                /* replace vswitch by sw */
+                char *vs = strstr(card->line, "vswitch");
+                memmove(vs, "     sw", 7);
+            }
+            else {
+                /* replace VON by cntl_on, VOFF by cntl_off, RON by r_on, and
+                 * ROFF by r_off */
+                tfree(card->line);
+                rep_spar(modpar);
+                card->line = tprintf(
+                        ".model a%s aswitch(%s %s %s %s  log=TRUE)", modname,
+                        modpar[0], modpar[1], modpar[2], modpar[3]);
+            }
             for (i = 0; i < 4; i++)
                 tfree(modpar[i]);
             if (nesting > 0)
@@ -7756,6 +7986,10 @@ static struct card *pspice_compat(struct card *oldcard)
 
     /* no need to continue if no vswitch is found */
     if (!modelsfound)
+        return newcard;
+
+    /* no need to change the switch instances if switch sw is used */
+    if (have_vh && have_vt)
         return newcard;
 
     /* second scan: find the switch instances s calling a vswitch model and
@@ -7827,9 +8061,12 @@ static void pspice_compat_a(struct card *oldcard)
  * Replace
  * D1 A K SDMOD
  * .MODEL SDMOD D (Roff=1000 Ron=0.7  Rrev=0.2  Vfwd=1  Vrev=10 Revepsilon=0.2
- * Epsilon=0.2 Ilimit=7 Revilimit=7) by ad1 a k asdmod .model asdmod
- * sidiode(Roff=1000 Ron=0.7  Rrev=0.2  Vfwd=1  Vrev=10 Revepsilon=0.2
- * Epsilon=0.2 Ilimit=7 Revilimit=7)
+ *         Epsilon=0.2 Ilimit=7 Revilimit=7)
+ * by
+ * ad1 a k asdmod
+ * .model asdmod sidiode(Roff=1000 Ron=0.7  Rrev=0.2  Vfwd=1  Vrev=10
+ *         Revepsilon=0.2 Epsilon=0.2 Ilimit=7 Revilimit=7)
+ * Remove '.backanno'
  */
 struct card *ltspice_compat(struct card *oldcard)
 {
@@ -7853,16 +8090,30 @@ struct card *ltspice_compat(struct card *oldcard)
     nextcard = insert_new_line(nextcard, new_str, 4, 0);
     nextcard->nextcard = oldcard;
 
+    /* remove .backanno, replace 'noiseless' by 'moisy=0' */
+    for (card = nextcard; card; card = card->nextcard) {
+        char* cut_line = card->line;
+        if (ciprefix(".backanno", cut_line)) {
+            *cut_line = '*';
+        }
+        else if (*cut_line == 'r') {
+            char* noi = strstr(cut_line, "noiseless");
+            if (noi) {
+                memcpy(noi, "noisy=0  ", 9);
+            }
+        }
+    }
+
     /* replace
    * D1 A K SDMOD
    * .MODEL SDMOD D (Roff=1000 Ron=0.7  Rrev=0.2  Vfwd=1  Vrev=10
-   Revepsilon=0.2 Epsilon=0.2 Ilimit=7 Revilimit=7)
+   *          Revepsilon=0.2 Epsilon=0.2 Ilimit=7 Revilimit=7)
    * by
    * a1 a k SDMOD
    * .model SDMOD sidiode(Roff=1000 Ron=0.7  Rrev=0.2  Vfwd=1  Vrev=10
-   Revepsilon=0.2 Epsilon=0.2 Ilimit=7 Revilimit=7)
+   *            Revepsilon=0.2 Epsilon=0.2 Ilimit=7 Revilimit=7)
    * Do this if one of the parameters, which are uncommon to standard diode
-   model, has been found.
+   * model, has been found.
 
    * simple hierachy, as nested subcircuits are not allowed in PSPICE */
 
@@ -7961,14 +8212,14 @@ struct card *ltspice_compat(struct card *oldcard)
             if ((nesting > 0) &&
                     find_a_model(modelsfound, stoks[3], subcktline->line)) {
                 tfree(card->line);
-                card->line = tprintf("a%s %s %s a%s", stoks[0], stoks[1],
-                        stoks[2], stoks[3]);
+                card->line = tprintf("a%s %s %s a%s",
+                    stoks[0], stoks[1], stoks[2], stoks[3]);
             }
             /* if model is not within same subcircuit, search at top level */
             else if (find_a_model(modelsfound, stoks[3], "top")) {
                 tfree(card->line);
-                card->line = tprintf("a%s %s %s a%s", stoks[0], stoks[1],
-                        stoks[2], stoks[3]);
+                card->line = tprintf("a%s %s %s a%s",
+                        stoks[0], stoks[1], stoks[2], stoks[3]);
             }
             for (i = 0; i < 4; i++)
                 tfree(stoks[i]);
@@ -8447,3 +8698,82 @@ static void inp_rem_unused_models(struct nscope *root, struct card *deck)
     // disable unused .model lines, and free the models assoc lists
     rem_unused_xxx(root);
 }
+
+/* Markus Kuhn <http://www.cl.cam.ac.uk/~mgk25/> -- 2005-03-30
+ * License: Modified BSD (see http://www.cl.cam.ac.uk/~mgk25/short-license.html)
+ * The utf8_check() function scans the '\0'-terminated string starting
+ * at s. It returns a pointer to the first byte of the first malformed
+ * or overlong UTF-8 sequence found, or NULL if the string contains
+ * only correct UTF-8. It also spots UTF-8 sequences that could cause
+ * trouble if converted to UTF-16, namely surrogate characters
+ * (U+D800..U+DFFF) and non-Unicode positions (U+FFFE..U+FFFF).*/
+#ifndef EXT_ASC
+static unsigned char*
+utf8_check(unsigned char *s)
+{
+    while (*s) {
+        if (*s < 0x80)
+            /* 0xxxxxxx */
+            s++;
+        else if ((s[0] & 0xe0) == 0xc0) {
+            /* 110XXXXx 10xxxxxx */
+            if ((s[1] & 0xc0) != 0x80 ||
+                (s[0] & 0xfe) == 0xc0)                        /* overlong? */
+                return s;
+            else
+                s += 2;
+        }
+        else if ((s[0] & 0xf0) == 0xe0) {
+            /* 1110XXXX 10Xxxxxx 10xxxxxx */
+            if ((s[1] & 0xc0) != 0x80 ||
+                (s[2] & 0xc0) != 0x80 ||
+                (s[0] == 0xe0 && (s[1] & 0xe0) == 0x80) ||    /* overlong? */
+                (s[0] == 0xed && (s[1] & 0xe0) == 0xa0) ||    /* surrogate? */
+                (s[0] == 0xef && s[1] == 0xbf &&
+                (s[2] & 0xfe) == 0xbe))                      /* U+FFFE or U+FFFF? */
+                return s;
+            else
+                s += 3;
+        }
+        else if ((s[0] & 0xf8) == 0xf0) {
+            /* 11110XXX 10XXxxxx 10xxxxxx 10xxxxxx */
+            if ((s[1] & 0xc0) != 0x80 ||
+                (s[2] & 0xc0) != 0x80 ||
+                (s[3] & 0xc0) != 0x80 ||
+                (s[0] == 0xf0 && (s[1] & 0xf0) == 0x80) ||    /* overlong? */
+                (s[0] == 0xf4 && s[1] > 0x8f) || s[0] > 0xf4) /* > U+10FFFF? */
+                return s;
+            else
+                s += 4;
+        }
+        else
+            return s;
+    }
+
+    return NULL;
+}
+
+/* Scan through input deck and check for utf-8 syntax errors */
+static void
+utf8_syntax_check(struct card *deck)
+{
+    struct card *card;
+    unsigned char *s;
+
+    for (card = deck; card; card = card->nextcard) {
+
+        char *curr_line = card->line;
+
+        if (*curr_line == '*')
+            continue;
+
+        s = utf8_check((unsigned char*)curr_line);
+
+        if (s) {
+            fprintf(stderr, "Error: UTF-8 syntax error in line %d at %s\n", card->linenum_orig, s);
+            controlled_exit(1);
+        }
+    }
+}
+#endif
+

@@ -263,7 +263,7 @@ all_show(wordlist *wl, int mode)
     int         i, j, n;
     int         param_flag, dev_flag;
 
-    if (!ft_curckt) {
+    if (!ft_curckt || !ft_curckt->ci_ckt) {
         fprintf(cp_err, "Error: no circuit loaded\n");
         return;
     }
@@ -425,7 +425,7 @@ all_show_old(wordlist *wl, int mode)
     int         i, j, n;
     int         param_flag, dev_flag;
 
-    if (!ft_curckt) {
+    if (!ft_curckt || !ft_curckt->ci_ckt) {
         fprintf(cp_err, "Error: no circuit loaded\n");
         return;
     }
@@ -1095,6 +1095,7 @@ if_set_binned_model(CKTcircuit *ckt, char *devname, char *param, struct dvec *va
         return;
     }
     w = v->va_V.vV_real;
+    free_struct_variable(v);
 
     v = if_getparam(ckt, &devname, "l", 0, 0);
     if (!v) {
@@ -1102,6 +1103,7 @@ if_set_binned_model(CKTcircuit *ckt, char *devname, char *param, struct dvec *va
         return;
     }
     l = v->va_V.vV_real;
+    free_struct_variable(v);
 
     if (param[0] == 'w')
         w = *val->v_realdata; /* overwrite the width with the alter param */
@@ -1309,7 +1311,7 @@ com_alter_common(wordlist *wl, int do_model)
 
     /* If we want alter the geometry of a MOS device
        we have to ensure that we are in the valid model bin. */
-    if ((dev[0] == 'm') && ((param[0] == 'w') || (param[0] == 'l')))
+    if ((dev[0] == 'm') && (eq(param, "w") || eq(param, "l")))
         if_set_binned_model(ft_curckt->ci_ckt, dev, param, dv);
 
     if_setparam(ft_curckt->ci_ckt, &dev, param, dv, do_model);
@@ -1332,7 +1334,7 @@ devexpand(char *name)
     if (strchr(name, '*') || strchr(name, '[') || strchr(name, '?')) {
         devices = cp_cctowl(ft_curckt->ci_devices);
         for (wl = NULL; devices; devices = devices->wl_next)
-            if (cp_globmatch(name, devices->wl_word))
+            if (!strcmp(name, devices->wl_word))
                 wl = wl_cons(devices->wl_word, wl);
     } else if (cieq(name, "all")) {
         wl = cp_cctowl(ft_curckt->ci_devices);
@@ -1401,7 +1403,15 @@ com_alter_mod(wordlist *wl)
         }
         filename = copy(eqword);
     }
+
     modfile = inp_pathopen(filename, readmode);
+
+    if (modfile == NULL) {
+        fprintf(cp_err, "Warning: Could not open file %s, altermod ignored\n", filename);
+        tfree(input);
+        tfree(filename);
+        return;
+    }
     {
         char *dir_name = ngdirname(filename);
         modeldeck = inp_readall(modfile, dir_name, 0, 0, NULL);
@@ -1462,14 +1472,15 @@ com_alter_mod(wordlist *wl)
         inptoken = gettok(&modelline); /* skip model type */
         tfree(inptoken);
         while ((inptoken = gettok(&modelline)) != NULL) {
-            /* exclude level and version */
-            if (ciprefix("version", inptoken) || ciprefix("level", inptoken)) {
+            /* exclude level, version and mfg */
+            if (ciprefix("version", inptoken) || ciprefix("level", inptoken) ||
+                ciprefix("mfg", inptoken)) {
                 tfree(inptoken);
                 continue;
             }
             arglist[2] = inptoken;
             /* create a new wordlist from array arglist */
-            newcommand = wl_build(arglist);
+            newcommand = wl_build((const char * const *) arglist);
             com_alter_common(newcommand->wl_next, 1);
             wl_free(newcommand);
             tfree(inptoken);

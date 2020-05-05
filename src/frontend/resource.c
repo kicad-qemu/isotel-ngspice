@@ -16,7 +16,6 @@ Author: 1985 Wayne A. Christopher, U. C. Berkeley CAD Group
 #include "ngspice/ftedefs.h"
 
 #include "circuits.h"
-#include "quote.h"
 #include "resource.h"
 #include "variable.h"
 #include "ngspice/cktdefs.h"
@@ -62,13 +61,15 @@ static void fprintmem(FILE *stream, unsigned long long memory);
 
 #if defined(HAVE_WIN32) || defined(HAVE__PROC_MEMINFO)
 static int get_procm(struct proc_mem *memall);
-static int get_sysmem(struct sys_mem *memall);
 
 struct sys_mem mem_t, mem_t_act;
 struct proc_mem mem_ng, mem_ng_act;
 
 #endif
 
+#if defined(HAVE_WIN32) &&  defined(SHARED_MODULE) && defined(__MINGW32__)
+static int get_sysmem(struct sys_mem *memall);
+#endif
 
 void
 init_rlimits(void)
@@ -123,33 +124,33 @@ com_rusage(wordlist *wl)
 /* Find out if the user is approaching his maximum data size.
    If usage is withing 95% of total available then a warning message is sent
    to the error stream (cp_err) */
-void
-ft_ckspace(void)
+void ft_ckspace(void)
 {
 #ifdef SHARED_MODULE
     /* False warning on some OSs, especially on Linux when loaded during runtime.
        The caller then has to take care of memory available */
     return;
 #else
-    unsigned long long freemem, totalmem, usage, avail;
-    freemem = getAvailableMemorySize();
-    totalmem = getMemorySize();
-    usage = getCurrentRSS();
-    avail = usage + freemem;
+    const unsigned long long freemem = getAvailableMemorySize();
+    const unsigned long long usage = getCurrentRSS();
 
-    if (totalmem == 0 || freemem == 0 || usage == 0)
+    if (freemem == 0 || usage == 0) { /* error obtaining data */
         return;
+    }
 
-    if ((double)freemem < (double)totalmem * 0.05) {
-        fprintf(cp_err, "Warning - approaching max data size: ");
-        fprintf(cp_err, "current size = ");
+    const unsigned long long avail = usage + freemem;
+    if ((double) usage > (double) avail * 0.95) {
+        (void) fprintf(cp_err,
+                "Warning - approaching max data size: "
+                "current size = ");
         fprintmem(cp_err, usage);
-        fprintf(cp_err, ", limit = ");
+        (void) fprintf(cp_err, ", limit = ");
         fprintmem(cp_err, avail);
-        fprintf(cp_err, "\n");
+        (void) fprintf(cp_err, "\n");
     }
 #endif
-}
+} /* end of function ft_chkspace */
+
 
 
 /* Print out one piece of resource usage information. */
@@ -222,7 +223,7 @@ printres(char *name)
             }
             /* do not print it the first time, doubling totalcputime */
             if (called)
-                fprintf(cp_out, "%s time since last call seconds) = %lu.%03lu \n",
+                fprintf(cp_out, "%s time since last call (seconds) = %lu.%03lu \n",
                         cpu_elapsed, last_sec, last_msec);
 
             last_sec = total_sec;
@@ -432,10 +433,13 @@ static int get_procm(struct proc_mem *memall) {
     } else
         return 0;
 #else
-/* Use Windows GlobalMemoryStatus or /proc/memory to obtain size of memory - not accurate */
-    get_sysmem(&mem_t_act); /* size is the difference between free memory at start time and now */
+   /* Use Windows GlobalMemoryStatus or /proc/memory to obtain size of memory -
+    * not accurate */
+    get_sysmem(&mem_t_act); /* size is the difference between free memory at
+                             * start time and now */
     if (mem_t.free > mem_t_act.free) /* it can happen that that ngspice is */
-        memall->size = (mem_t.free - mem_t_act.free); /* to small compared to os memory usage */
+        memall->size = (mem_t.free - mem_t_act.free); /* too small compared to
+                                                       * os memory usage */
     else
         memall->size = 0;       /* sure, it is more */
     memall->resident = 0;
@@ -477,8 +481,8 @@ static int get_procm(struct proc_mem *memall) {
 }
 
 
-static int
-get_sysmem(struct sys_mem *memall)
+#if defined(HAVE_WIN32) &&  defined(SHARED_MODULE) && defined(__MINGW32__)
+static int get_sysmem(struct sys_mem *memall)
 {
 #ifdef HAVE_WIN32
 #if (_WIN32_WINNT >= 0x0500)
@@ -543,6 +547,7 @@ get_sysmem(struct sys_mem *memall)
 #endif
     return 1;
 }
+#endif
 
 
 #else

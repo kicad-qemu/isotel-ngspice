@@ -1,6 +1,7 @@
 #ifndef ngspice_WORDLIST_H
 #define ngspice_WORDLIST_H
 
+#include <stdio.h>
 
 /* Doubly linked lists of words. */
 struct wordlist {
@@ -31,21 +32,6 @@ wordlist * wl_range(wordlist *wl, int low, int up);
 wordlist * wl_reverse(wordlist *wl);
 void wl_sort(wordlist *wl);
 wordlist * wl_splice(wordlist *elt, wordlist *list);
-
-
-
-
-
-#ifdef QUOTE_CHAR
-/* For quoting individual characters. '' strings are all quoted, but
- * `` and "" strings are maintained as single words with the quotes
- * around them.  Note that this won't work on non-ascii machines.  */
-#define quote(c)    ((c) | 0200)
-#define strip(c)    ((c) & 0177)
-#else
-#define quote(c) (c)
-#define strip(c) (c)
-#endif
 
 
 #endif

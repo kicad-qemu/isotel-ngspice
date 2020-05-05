@@ -41,21 +41,18 @@ VDMOSask(CKTcircuit *ckt, GENinstance *inst, int which, IFvalue *value,
         case VDMOS_M:
             value->rValue = here->VDMOSm;
             return(OK);
-        case VDMOS_L:
-            value->rValue = here->VDMOSl;
-                return(OK);
-        case VDMOS_W:
-            value->rValue = here->VDMOSw;
-                return(OK);
         case VDMOS_OFF:
-            value->rValue = here->VDMOSoff;
-                return(OK);
+            value->iValue = here->VDMOSoff;
+            return(OK);
+        case VDMOS_THERMAL:
+            value->iValue = here->VDMOSthermal;
+            return(OK);
         case VDMOS_IC_VDS:
             value->rValue = here->VDMOSicVDS;
-                return(OK);
+            return(OK);
         case VDMOS_IC_VGS:
             value->rValue = here->VDMOSicVGS;
-                return(OK);
+            return(OK);
         case VDMOS_DNODE:
             value->iValue = here->VDMOSdNode;
             return(OK);
@@ -64,6 +61,9 @@ VDMOSask(CKTcircuit *ckt, GENinstance *inst, int which, IFvalue *value,
             return(OK);
         case VDMOS_SNODE:
             value->iValue = here->VDMOSsNode;
+            return(OK);
+        case VDMOS_TNODE:
+            value->iValue = here->VDMOStempNode;
             return(OK);
         case VDMOS_SNODEPRIME:
             value->iValue = here->VDMOSsNodePrime;
@@ -88,15 +88,6 @@ VDMOSask(CKTcircuit *ckt, GENinstance *inst, int which, IFvalue *value,
             return(OK);
         case VDMOS_VON:
             value->rValue = here->VDMOSvon;
-            return(OK);
-        case VDMOS_VDSAT:
-            value->rValue = here->VDMOSvdsat;
-            return(OK);
-        case VDMOS_SOURCEVCRIT:
-            value->rValue = here->VDMOSsourceVcrit;
-            return(OK);
-        case VDMOS_DRAINVCRIT:
-            value->rValue = here->VDMOSdrainVcrit;
             return(OK);
         case VDMOS_CD:
             value->rValue = here->VDMOScd;
@@ -124,6 +115,9 @@ VDMOSask(CKTcircuit *ckt, GENinstance *inst, int which, IFvalue *value,
             return(OK);
         case VDMOS_CQGD:
             value->rValue = *(ckt->CKTstate0 + here->VDMOScqgd);
+            return(OK);
+        case VDMOS_CDIO:
+            value->rValue = *(ckt->CKTstate0 + here->VDIOcurrent);
             return(OK);
         case VDMOS_CG :
             if (ckt->CKTcurrentAnalysis & DOING_AC) {
@@ -163,23 +157,26 @@ VDMOSask(CKTcircuit *ckt, GENinstance *inst, int which, IFvalue *value,
                 strcpy(errMsg,msg);
                 return(E_ASKPOWER);
             } else {
-                double temp;
+                value->rValue = fabs(here->VDMOScd * 
+                                     (*(ckt->CKTrhsOld + here->VDMOSdNode) - 
+                                      *(ckt->CKTrhsOld + here->VDMOSsNode)));
 
-                value->rValue = here->VDMOScd * 
-                        *(ckt->CKTrhsOld + here->VDMOSdNode);
                 if ((ckt->CKTcurrentAnalysis & DOING_TRAN) && 
                         !(ckt->CKTmode & MODETRANOP)) {
-                    value->rValue += (*(ckt->CKTstate0 + here->VDMOScqgd) +
-                            *(ckt->CKTstate0 + here->VDMOScqgs)) *
-                            *(ckt->CKTrhsOld + here->VDMOSgNode);
+                    value->rValue += fabs(*(ckt->CKTstate0 + here->VDMOScqgd) *
+                                          (*(ckt->CKTrhsOld + here->VDMOSgNode) -
+                                           *(ckt->CKTrhsOld + here->VDMOSdNode)));
                 }
-                temp = -here->VDMOScd;
                 if ((ckt->CKTcurrentAnalysis & DOING_TRAN) && 
                         !(ckt->CKTmode & MODETRANOP)) {
-                    temp -= *(ckt->CKTstate0 + here->VDMOScqgd) + 
-                            *(ckt->CKTstate0 + here->VDMOScqgs);
+                    value->rValue += fabs(*(ckt->CKTstate0 + here->VDMOScqgs) *
+                                          (*(ckt->CKTrhsOld + here->VDMOSgNode) -
+                                           *(ckt->CKTrhsOld + here->VDMOSsNode)));
                 }
-                value->rValue += temp * *(ckt->CKTrhsOld + here->VDMOSsNode);
+
+                value->rValue += fabs(*(ckt->CKTstate0 + here->VDIOcurrent) * 
+                                      (*(ckt->CKTrhsOld + here->VDMOSdNode) -
+                                       *(ckt->CKTrhsOld + here->VDMOSsNode)));
             }
             return(OK);
         default:

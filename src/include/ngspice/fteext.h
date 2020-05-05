@@ -60,6 +60,7 @@ extern void *cx_unwrap(void *, short int , int , int *, short int *);
 extern void *cx_j(void *, short int , int , int *, short int *);
 extern void *cx_real(void *, short int , int , int *, short int *);
 extern void *cx_imag(void *, short int , int , int *, short int *);
+extern void *cx_conj(void *, short int , int , int *, short int *);
 extern void *cx_pos(void *, short int , int , int *, short int *);
 extern void *cx_db(void *, short int , int , int *, short int *);
 extern void *cx_log10(void *, short int , int , int *, short int *);
@@ -207,14 +208,15 @@ extern bool gr_circular;
 
 /* inp.c */
 
-void inp_dodeck(struct card *deck, char *tt, wordlist *end, bool reuse,
+int inp_dodeck(struct card *deck, char *tt, wordlist *end, bool reuse,
                 struct card *options, char *filename);
-extern void inp_source(char *file);
-void inp_spsource(FILE *fp, bool comfile, char *filename, bool intfile);
+extern void inp_source(const char *file);
+int inp_spsource(FILE *fp, bool comfile, char *filename, bool intfile);
 extern void inp_casefix(char *string);
 extern void inp_list(FILE *file, struct card *deck, struct card *extras, int type);
-extern struct card *inp_readall(FILE *fp, char *dir_name, bool comfile, bool intfile, bool *expr_w_temper);
-extern FILE *inp_pathopen(char *name, char *mode);
+struct card *inp_readall(FILE *fp, const char *dir_name,
+        bool comfile, bool intfile, bool *expr_w_temper_p);
+extern FILE *inp_pathopen(const char *name, const char *mode);
 extern char *search_identifier(char *str, const char *identifier, char *str_begin);
 extern char *find_assignment(const char *s);
 extern char *find_back_assignment(const char *s, const char *start);
@@ -245,7 +247,7 @@ extern void ft_polyderiv(double *coeffs, int degree);
 /* numparse.c */
 
 extern bool ft_strictnumparse;
-double *ft_numparse(char **s, bool whole);
+int ft_numparse(char **s, bool whole, double *p_val);
 
 /* options.c */
 
@@ -336,7 +338,7 @@ extern int ft_typnum(char *);
 
 /* vectors.c */
 
-extern bool vec_iszero(struct dvec *v);
+extern bool vec_iszero(const struct dvec *v);
 extern bool vec_eq(struct dvec *v1, struct dvec *v2);
 extern int plot_num;
 extern struct dvec *vec_fromplot(char *word, struct plot *plot);
@@ -359,11 +361,10 @@ extern void ft_loadfile(char *file);
 extern void vec_new(struct dvec *d);
 extern void plot_docoms(wordlist *wl);
 extern void vec_remove(const char *name);
-extern void plot_setcur(char *name);
-extern struct plot *get_plot(char* name);
+extern void plot_setcur(const char *name);
+extern struct plot *get_plot(const char *name);
 extern void plot_new(struct plot *pl);
 extern char *vec_basename(struct dvec *v);
-extern bool plot_prefix(char *pre, char *str);
 extern void vec_transpose(struct dvec *v);
 
 /* main.c */

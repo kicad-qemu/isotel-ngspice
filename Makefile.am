@@ -12,12 +12,12 @@ EXTRA_DIST = FAQ autogen.sh Stuarts_Poly_Notes  \
 		build-for-mac-os.sh \
 		cross-compile.sh cross-compile-shared.sh \
 		compile_min.sh compile_linux.sh compile_min_shared.sh \
-		ngspice.pc.in .gitignore
+		compile_macos.sh ngspice.pc.in .gitignore
 
 MAINTAINERCLEANFILES = Makefile.in aclocal.m4 ar-lib compile config.guess \
 			src/include/ngspice/config.h.in config.sub configure install-sh \
 			missing mkinstalldirs stamp-h.in ltconfig \
-			ltmain.sh depcomp ylwrap
+			ltmain.sh depcomp ylwrap ngspice.pc
 
 ACLOCAL_AMFLAGS = -I m4
 

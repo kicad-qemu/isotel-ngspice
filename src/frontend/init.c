@@ -12,10 +12,6 @@ Author: 1985 Wayne A. Christopher, U. C. Berkeley CAD Group
 #include "variable.h"
 
 
-char cp_chars[128]; /* used in fcn cp_lexer() from lexical.c */
-
-static char *singlec = "<>;&";
-
 void
 cp_init(void)
 /* called from ft_cpinit() in cpitf.c.
@@ -25,13 +21,6 @@ cp_init(void)
    cp_curin, cp_curout, cp_curerr (defined in streams.c)
 */
 {
-    char *s;
-
-    memset(cp_chars, 0, 128);
-    for (s = singlec; *s; s++)
-        /* break word to right or left of characters <>;&*/
-        cp_chars[(int) *s] = (CPC_BRR | CPC_BRL);
-
     cp_vset("history", CP_NUM, &cp_maxhistlength);
 
     cp_curin = stdin;
@@ -41,4 +30,41 @@ cp_init(void)
     /* io redirection in streams.c:
        cp_in set to cp_curin etc. */
     cp_ioreset();
+
+    /*set a variable oscompiled containing the OS at compile time
+         [0], Other
+         [1], MINGW for MS Windows
+		 [2], Cygwin for MS Windows
+         [3], FreeBSD
+	     [4], OpenBSD
+		 [5], Solaris
+         [6], Linux
+         [7], macOS
+         [8], Visual Studio for MS Windows
+     The variable may be used in a .control section to perform OS
+     specific actions (setting fonts etc.).
+     */
+    int itmp;
+#if OS_COMPILED == 1
+    itmp = 1;
+#elif OS_COMPILED == 2
+    itmp = 2;
+#elif OS_COMPILED == 3
+    itmp = 3;
+#elif OS_COMPILED == 4
+    itmp = 4;
+#elif OS_COMPILED == 5
+    itmp = 5;
+#elif OS_COMPILED == 6
+    itmp = 6;
+#elif OS_COMPILED == 7
+    itmp = 7;
+#else
+    itmp = 0;
+#endif
+    /* not using configure.ac */
+#ifdef _MSC_VER
+    itmp = 8;
+#endif
+    cp_vset("oscompiled", CP_NUM, &itmp);
 }

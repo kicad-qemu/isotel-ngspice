@@ -47,7 +47,6 @@
 #include "com_let.h"
 #include "com_plot.h"
 #include "com_setscale.h"
-#include "com_xgraph.h"
 #include "com_gnuplot.h"
 #include "com_state.h"
 #include "com_chdir.h"
@@ -205,10 +204,6 @@ struct comm spcp_coms[] = {
       { 040000, 040000, 040000, 040000 }, E_DEFHMASK, 1, LOTS,
       NULL,
       "varname ... : Perform matrix transposition on multi-D vectors." } ,
-    { "xgraph", com_xgraph, FALSE, TRUE,
-      { 1, 041000, 041000, 041000 }, E_DEFHMASK, 1, LOTS,
-      NULL,
-      "file plotargs : Send plot to Xgraph-11." } ,
     { "gnuplot", com_gnuplot, FALSE, TRUE,
       { 1, 041000, 041000, 041000 }, E_DEFHMASK, 2, LOTS,
       NULL,
@@ -241,6 +236,10 @@ struct comm spcp_coms[] = {
       { 040000, 040000, 040000, 040000 }, E_DEFHMASK, 1, LOTS,
       NULL,
       "varname ... : Undefine vectors." } ,
+    { "remzerovec", com_remzerovec, FALSE, FALSE,
+        { 040000, 040000, 040000, 040000 }, E_DEFHMASK, 0, LOTS,
+        NULL,
+        "remove zero length vectors." } ,
     { "print", com_print, FALSE, TRUE,
       { 040000, 040000, 040000, 040000 }, E_BEGINNING, 1, LOTS,
       arg_print,
@@ -689,10 +688,6 @@ struct comm nutcp_coms[] = {
       { 040000, 040000, 040000, 040000 }, E_DEFHMASK, 1, LOTS,
       NULL,
       "varname ... : Perform matrix transposition on multi-D vectors." } ,
-    { "xgraph", com_xgraph, FALSE, TRUE,
-      { 1, 041000, 041000, 041000 }, E_DEFHMASK, 1, LOTS,
-      NULL,
-      "file plotargs : Send plot to Xgraph-11." } ,
     { "gnuplot", com_gnuplot, FALSE, TRUE,
       { 1, 041000, 041000, 041000 }, E_DEFHMASK, 2, LOTS,
       NULL,
@@ -725,6 +720,10 @@ struct comm nutcp_coms[] = {
       { 040000, 040000, 040000, 040000 }, E_DEFHMASK, 1, LOTS,
       NULL,
       "varname ... : Undefine vectors." } ,
+    { "remzerovec", com_remzerovec, FALSE, FALSE,
+      { 040000, 040000, 040000, 040000 }, E_DEFHMASK, 0, LOTS,
+      NULL,
+      "remove zero length vectors." },
     { "print", com_print, FALSE, TRUE,
       { 040000, 040000, 040000, 040000 }, E_BEGINNING, 1, LOTS,
       arg_print,

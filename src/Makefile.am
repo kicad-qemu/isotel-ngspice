@@ -111,6 +111,7 @@ ngspice_SOURCES = \
 ngspice_CPPFLAGS = $(AM_CPPFLAGS) -DSIMULATOR
 
 if WINGUI
+ngspice_LDFLAGS = -municode $(AM_LDFLAGS)
 ngspice_SOURCES += winmain.c hist_info.c
 endif
 
@@ -260,6 +261,7 @@ endif !NO_HELP
 ngsconvert_SOURCES =  ngsconvert.c
 
 ngsconvert_LDADD =  \
+	frontend/com_history.lo \
 	frontend/libfte.la \
 	frontend/parser/libparser.la \
 	maths/misc/libmathmisc.la \
@@ -271,6 +273,7 @@ ngsconvert_LDADD =  \
 ngproc2mod_SOURCES = ngproc2mod.c
 
 ngproc2mod_LDADD =  \
+	frontend/libfte.la \
 	frontend/parser/libparser.la \
 	spicelib/parser/libinp.la \
 	misc/libmisc.la
@@ -281,6 +284,8 @@ ngproc2mod_LDADD =  \
 ngmultidec_SOURCES = ngmultidec.c
 
 ngmultidec_LDADD =  \
+	frontend/libfte.la \
+	frontend/parser/libparser.la \
 	maths/sparse/libsparse.la \
 	misc/libmisc.la
 
@@ -289,6 +294,11 @@ ngmultidec_LDADD =  \
 
 ngmakeidx_SOURCES = makeidx.c
 
+ngmakeidx_LDADD =  \
+	frontend/libfte.la \
+	frontend/parser/libparser.la \
+	misc/libmisc.la
+    
 ## create index for online help:
 
 ngspice.idx: ngmakeidx$(EXEEXT) $(srcdir)/ngspice.txt
@@ -332,17 +342,16 @@ AM_CFLAGS = -static
 LIBS = @LIBS@ @X_LIBS@ @X_PRE_LIBS@ @X_EXTRA_LIBS@
 
 if WINGUI
-LIBS += -lpsapi -lShlwapi
+LIBS += -lpsapi -lshlwapi
 endif
 
 if WINCONSOLE
-LIBS += -lpsapi -lShlwapi
+LIBS += -lpsapi -lshlwapi
 endif
 
-## FIXME: Should be allwed, but fails within MSYS2
-#if SHWIN
-#LIBS += -lpsapi -lShlwapi
-#endif
+if SHWIN
+LIBS += -lpsapi -lshlwapi
+endif
 
 CLEANFILES = ngspice.idx spinit tclspinit pkgIndex.tcl
 
@@ -357,7 +366,7 @@ pkgIndex_DATA = pkgIndex.tcl
 pkgIndexdir = $(pkglibdir)
 
 if TCLWIN
-LIBS += -lpsapi -lShlwapi  -ltcl84 -lBLT24
+LIBS += -lpsapi -lshlwapi  -ltcl84 -lBLT24
 endif
 
 libspice_la_SOURCES = \

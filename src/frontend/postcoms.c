@@ -19,7 +19,6 @@ Author: 1985 Wayne A. Christopher, U. C. Berkeley CAD Group
 
 #include "completion.h"
 #include "postcoms.h"
-#include "quote.h"
 #include "variable.h"
 #include "parser/complete.h" /* va: throwaway */
 #include "plotting/plotting.h"
@@ -31,31 +30,66 @@ static void DelPlotWindows(struct plot *pl);
 /* check if the user want's to delete the scale vector of the current plot.
    This should not happen, because then redrawing the graph crashes ngspice */
 static bool
-check_cp(char* vecname)
+is_scale_vec_of_current_plot(const char *v_name)
 {
-    if (plot_cur && plot_cur->pl_scale && plot_cur->pl_scale->v_name && eq(plot_cur->pl_scale->v_name, vecname)) {
-        fprintf(cp_err, "\nWarning: Scale vector '%s' of current plot cannot be deleted!\n", vecname);
-        fprintf(cp_err, "    Command 'unlet %s' is ignored.\n\n", vecname);
-        return TRUE;
-    }
-    else
+    if (!plot_cur) { /* no current plot */
         return FALSE;
-}
+    }
 
+    const struct dvec * const pl_scale = plot_cur->pl_scale;
+    if (!pl_scale) { /* no scale vector */
+        return FALSE;
+    }
+
+    /* Test if this vector's name matches the scale vector's name */
+    return cieq(v_name, pl_scale->v_name);
+} /* end of function is_scale_vec_of_current_plot */
+
+
+
+/* Remove vectors in the wordlist from the current plot */
 void
 com_unlet(wordlist *wl)
 {
-    while (wl) {
-        /* don't delete the scale vector of the current plot */
-        if (!check_cp(wl->wl_word))
-            vec_remove(wl->wl_word);
-        wl = wl->wl_next;
-    }
-}
+    for ( ; wl != (wordlist *) NULL; wl = wl->wl_next) {
+        /* Don't delete the scale vector of the current plot */
+        const char * const vector_name = wl->wl_word;
+        if (is_scale_vec_of_current_plot(vector_name)) {
+            /* If it is the scale vector of the current plot, print a
+             * warning. Note that if it is true,  the scale vector name must
+             * exist, so no part of plot_cur->pl_scale->v_name can be null. */
+            fprintf(cp_err,
+                    "\nWarning: Scale vector '%s' of the current plot "
+                    "cannot be deleted!\n"
+                    "Command 'unlet %s' is ignored.\n\n",
+                    plot_cur->pl_scale->v_name, vector_name);
+        }
+        else {
+            vec_remove(vector_name);
+        }
+    } /* end of loop over vectors to delete */
+} /* end of function com_unlet */
+
+
+/* Remove zero length vectors from the current plot */
+void
+com_remzerovec(wordlist* wl)
+{
+    NG_IGNORE(wl);
+    
+    struct dvec* ov;
+
+    for (ov = plot_cur->pl_dvecs; ov; ov = ov->v_next) {
+        if (ov->v_length == 0) {
+            ov->v_flags &= ~VF_PERMANENT;
+            /* Remove from the keyword list. */
+            cp_remkword(CT_VECTOR, ov->v_name);
+        }
+    } /* end of loop over vectors to delete */
+} /* end of function com_remzerovec */
 
 
 /* Load in a file. */
-
 void
 com_load(wordlist *wl)
 {
@@ -426,8 +460,9 @@ com_write(wordlist *wl)
     else
         names = ft_getpnames(&all, TRUE);
 
-    if (names == NULL)
+    if (names == NULL) {
         return;
+    }
 
     for (pn = names; pn; pn = pn->pn_next) {
         d = ft_evaluate(pn);
@@ -461,7 +496,7 @@ com_write(wordlist *wl)
                 /* Note that since we are building a new plot
                  * we don't want to vec_new this one...
                  */
-                tfree(vv->v_name);
+                txfree(vv->v_name);
                 vv->v_name = basename;
 
                 if (end)
@@ -512,10 +547,7 @@ com_write(wordlist *wl)
             /* Otherwise loop through again... */
         }
 
-        if (ascii)
-            raw_write(file, &newplot, appendwrite, FALSE);
-        else
-            raw_write(file, &newplot, appendwrite, TRUE);
+        raw_write(file, &newplot, appendwrite, !ascii);
 
         for (vv = newplot.pl_dvecs; vv;) {
             struct dvec *next_vv = vv->v_next;
@@ -579,7 +611,7 @@ com_write_sparam(wordlist *wl)
     sbuf[3] = "S12";
     sbuf[4] = "S22";
     sbuf[5] = NULL;
-    wl_sparam = wl_build(sbuf);
+    wl_sparam = wl_build((const char * const *) sbuf);
 
     names = ft_getpnames(wl_sparam, TRUE);
     if (names == NULL)
@@ -716,22 +748,27 @@ com_transpose(wordlist *wl)
     struct dvec *d;
     char *s;
 
-    while (wl) {
+    /* For each vector named in the wordlist, perform the transform to
+     * it and the vectors associated with it through v_link2 */
+    for ( ; wl != (wordlist *) NULL; wl = wl->wl_next) {
         s = cp_unquote(wl->wl_word);
         d = vec_get(s);
         tfree(s); /*DG: Avoid Memory Leak */
-        if (d == NULL)
+        if (d == NULL) {
+            /* Print error message, but continue with other vectors */
             fprintf(cp_err, "Error: no such vector as %s.\n", wl->wl_word);
-        else
+       }
+        else {
+            /* Transpose the named vector and vectors tied to it
+             * through v_link2 */
             while (d) {
                 vec_transpose(d);
                 d = d->v_link2;
             }
-        if (wl->wl_next == NULL)
-            return;
-        wl = wl->wl_next;
-    }
-}
+        }
+    } /* end of loop over words in wordlist */
+} /* end of function com_transpose */
+
 
 
 /* Take a set of vectors and form a new vector of the nth elements of each. */
@@ -743,19 +780,23 @@ com_cross(wordlist *wl)
     struct pnode *pn, *names;
     int i, ind;
     bool comp = FALSE;
-    double *d;
 
     newvec = wl->wl_word;
     wl = wl->wl_next;
     s = wl->wl_word;
-    if ((d = ft_numparse(&s, FALSE)) == NULL) {
-        fprintf(cp_err, "Error: bad number %s\n", wl->wl_word);
-        return;
+
+    {
+        double val;
+        if (ft_numparse(&s, FALSE, &val) <= 0) {
+            fprintf(cp_err, "Error: bad index value %s\n", wl->wl_word);
+            return;
+        }
+        if ((ind = (int) val) < 0) {
+            fprintf(cp_err, "Error: badstrchr %d\n", ind);
+            return;
+        }
     }
-    if ((ind = (int)*d) < 0) {
-        fprintf(cp_err, "Error: badstrchr %d\n", ind);
-        return;
-    }
+
     wl = wl->wl_next;
     names = ft_getpnames(wl, TRUE);
     for (pn = names; pn; pn = pn->pn_next) {
@@ -779,13 +820,9 @@ com_cross(wordlist *wl)
 
     vec_remove(newvec);
     v = dvec_alloc(copy(newvec),
-                   vecs
-                   ? vecs->v_type
-                   : SV_NOTYPE,
-                   comp
-                   ? (VF_COMPLEX | VF_PERMANENT)
-                   : (VF_REAL | VF_PERMANENT),
-                   i, NULL);
+            (int) (vecs ? vecs->v_type : SV_NOTYPE),
+            comp ? (VF_COMPLEX | VF_PERMANENT) : (VF_REAL | VF_PERMANENT),
+            i, NULL);
 
     /* Now copy the ind'ths elements into this one. */
     for (n = vecs, i = 0; n; n = n->v_link2, i++)
@@ -810,90 +847,111 @@ done:
     free_pnode(names);
 }
 
-
-void
-com_destroy(wordlist *wl)
+/* Free resources associated with "plot" datasets. The wordlist contains
+ * the names of the plots to delete or the word "all" to delete all but the
+ * default "const" plot, which cannot be deleted, even by name. If there are
+ * no names given, the current plot is deleted */
+void com_destroy(wordlist *wl)
 {
-    struct plot *pl, *npl = NULL;
-
+    /* If no name given, delete the current output data */
     if (!wl) {
         DelPlotWindows(plot_cur);
         killplot(plot_cur);
-    } else if (eq(wl->wl_word, "all")) {
+    }
+    else if (eq(wl->wl_word, "all")) { /* "all" -> all plots deleted */
+        struct plot *pl, *npl = NULL;
         for (pl = plot_list; pl; pl = npl) {
             npl = pl->pl_next;
             if (!eq(pl->pl_typename, "const")) {
                 DelPlotWindows(pl);
                 killplot(pl);
-            } else {
+            }
+            else {
                 plot_num = 1;
             }
         }
-    } else {
+    }
+    else { /* list of plots by name */
         while (wl) {
-            for (pl = plot_list; pl; pl = pl->pl_next)
-                if (eq(pl->pl_typename, wl->wl_word))
+            struct plot *pl;
+            for (pl = plot_list; pl; pl = pl->pl_next) {
+                if (eq(pl->pl_typename, wl->wl_word)) {
                     break;
+                }
+            }
             if (pl) {
                 DelPlotWindows(pl);
                 killplot(pl);
-            } else {
+            }
+            else {
                 fprintf(cp_err, "Error: no such plot %s\n", wl->wl_word);
             }
             wl = wl->wl_next;
         }
     }
-}
+} /* end of function com_destroy */
 
 
-static void
-killplot(struct plot *pl)
+
+static void killplot(struct plot *pl)
 {
-    struct dvec *v, *nv = NULL;
-    struct plot *op;
-
     if (eq(pl->pl_typename, "const")) {
         fprintf(cp_err, "Error: can't destroy the constant plot\n");
         return;
     }
     /*  pl_dvecs, pl_scale */
-    for (v = pl->pl_dvecs; v; v = nv) {
-        nv = v->v_next;
-        vec_free(v);
+    {
+        struct dvec *v;
+        struct dvec *nv;
+        for (v = pl->pl_dvecs; v; v = nv) {
+            nv = v->v_next;
+            vec_free(v);
+        }
     }
+
     /* unlink from plot_list (linked via pl_next) */
-    if (pl == plot_list) {
+    if (pl == plot_list) { /* First in list */
         plot_list = pl->pl_next;
-        if (pl == plot_cur)
+        if (pl == plot_cur) {
             plot_cur = plot_list;
-    } else {
-        for (op = plot_list; op; op = op->pl_next)
-            if (op->pl_next == pl)
+        }
+    }
+    else { /* inside list */
+        struct plot *op;
+        for (op = plot_list; op; op = op->pl_next) {
+            if (op->pl_next == pl) {
                 break;
-        if (!op)
+            }
+        }
+        if (!op) {
             fprintf(cp_err,
                     "Internal Error: kill plot -- not in list\n");
+            return;
+        }
         op->pl_next = pl->pl_next;
-        if (pl == plot_cur)
+        if (pl == plot_cur) {
             plot_cur = op;
+        }
     }
     /* delete the hash table entry for this plot */
-    if (pl->pl_lookup_table)
+    if (pl->pl_lookup_table) {
         nghash_free(pl->pl_lookup_table, NULL, NULL);
-    tfree(pl->pl_title);
-    tfree(pl->pl_name);
-    tfree(pl->pl_typename);
+    }
+    txfree(pl->pl_title);
+    txfree(pl->pl_name);
+    txfree(pl->pl_typename);
     wl_free(pl->pl_commands);
-    tfree(pl->pl_date); /* va: also tfree (memory leak) */
-    if (pl->pl_ccom)    /* va: also tfree (memory leak) */
+    txfree(pl->pl_date); /* va: also tfree (memory leak) */
+    if (pl->pl_ccom)  { /* va: also tfree (memory leak) */
         throwaway(pl->pl_ccom);
+    }
 
     if (pl->pl_env) { /* The 'environment' for this plot. */
         /* va: HOW to do? */
         printf("va: killplot should tfree pl->pl_env=(%p)\n", pl->pl_env);
         fflush(stdout);
     }
-    tfree(pl); /* va: also tfree pl itself (memory leak) */
+    txfree(pl); /* va: also tfree pl itself (memory leak) */
 }
 
 

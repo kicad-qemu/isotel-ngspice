@@ -21,10 +21,16 @@
 /* hardcopy file plotargs, or 'hardcopy file' -- with no other args
  * this prompts the user for a window to dump to a plot file. XXX no
  * it doesn't.  */
-void
-com_hardcopy(wordlist *wl)
+void com_hardcopy(wordlist *wl)
 {
+    /* Check if there is a graph available */
+    if (currentgraph == (GRAPH *) NULL) {
+        (void) fprintf(cp_err, "There is no graph to hardcopy.\n");
+        return;
+    }
+
     char *fname;
+    size_t n_byte_fname; /* size of fname in bytes, including null */
     char buf[BSIZE_SP], device[BSIZE_SP];
     bool tempf = FALSE;
     char *devtype;
@@ -40,43 +46,58 @@ com_hardcopy(wordlist *wl)
 
     if (wl) {
         hc_button = 0;
-        fname = wl->wl_word;
+        fname = copy(wl->wl_word);
         wl = wl->wl_next;
-    } else {
+    }
+    else {
         hc_button = 1;
         fname = smktemp("hc");
         tempf = TRUE;
     }
+    n_byte_fname = (strlen(fname) + 1) * sizeof *fname;
 
-    if (!cp_getvar("hcopydevtype", CP_STRING, buf, sizeof(buf)))
+    if (!cp_getvar("hcopydevtype", CP_STRING, buf, sizeof(buf))) {
         devtype = "postscript";
-    else
+    }
+    else {
         devtype = buf;
+    }
 
     /* enable screen plot selection for these display types */
     foundit = 0;
-
-
-    // PushGraphContext(currentgraph);
 
 #ifdef HAS_WINGUI
     if (!wl && hc_button) {
         char *psfname;
         GRAPH *tempgraph;
+        /* initialze PS by calling PS_Init() */
         if (DevSwitch(devtype))
             return;
-        tempgraph = CopyGraph(currentgraph);
+        if (currentgraph)
+            tempgraph = CopyGraph(currentgraph);
+        else {
+            fprintf(stderr,
+                    "No parameters for hardcopy command, not previous plot:\n");
+            fprintf(stderr, "    Command hardcopy cannot be executed\n\n");
+            DevSwitch(NULL);
+            return;
+        }
+
         /* change .tmp to .ps */
         psfname = strchr(fname, '.');
         if (psfname) {
             psfname[1] = 'p';
             psfname[2] = 's';
             psfname[3] = '\0';
-        } else {
-            fname = trealloc(fname, strlen(fname)+4);
-            strcat(fname, ".ps");
+        }
+        else {
+            fname = trealloc(fname, n_byte_fname + 3);
+            (void) memcpy(fname + n_byte_fname - 1, ".ps", 4);
+            n_byte_fname += 3;
         }
         tempgraph->devdep = fname;
+        tempgraph->n_byte_devdep = n_byte_fname;
+
         if (NewViewport(tempgraph)) {
             DevSwitch(NULL);
             return;
@@ -92,21 +113,23 @@ com_hardcopy(wordlist *wl)
 
 #ifndef X_DISPLAY_MISSING
     if (!wl && hc_button) {
-
         REQUEST request;
         RESPONSE response;
         GRAPH *tempgraph;
 
         request.option = click_option;
         Input(&request, &response);
-        if (response.option == error_option)
+        if (response.option == error_option) {
             return;
+        }
 
         if (response.reply.graph) {
-            if (DevSwitch(devtype))
+            if (DevSwitch(devtype)) {
                 return;
+            }
             tempgraph = CopyGraph(response.reply.graph);
             tempgraph->devdep = fname;
+            tempgraph->n_byte_devdep = n_byte_fname;
             if (NewViewport(tempgraph)) {
                 DevSwitch(NULL);
                 return;
@@ -133,19 +156,20 @@ com_hardcopy(wordlist *wl)
     PushGraphContext(currentgraph);
 
     if (!foundit) {
-
-        if (!wl) {
+        if (!wl && cp_getvar("interactive", CP_BOOL, NULL, 0)) {
             char *buf2;
             outmenuprompt("which variable ? ");
             buf2 = prompt(cp_in);
-            if (!buf2)
+            if (!buf2) {
                 return;
+            }
             wl = wl_cons(buf2, NULL);
             wl = process(wl);
         }
 
-        if (DevSwitch(devtype))
+        if (DevSwitch(devtype)) {
             return;
+        }
 
         if (!wl || !plotit(wl, fname, NULL)) {
             printf("com_hardcopy: graph not defined\n");
@@ -164,9 +188,15 @@ com_hardcopy(wordlist *wl)
             if (!cp_getvar("lprplot5", CP_STRING, format, sizeof(format)))
                 strcpy(format, SYSTEM_PLOT5LPR);
             (void) sprintf(buf, format, device, fname);
-            fprintf(cp_out, "Printing %s on the %s printer.\n", fname, device);
-            (void) system(buf);
-            printed = 1;
+            if (system(buf) == -1) {
+                fprintf(cp_out, "Printing %s on the %s printer failed.\n",
+                        fname, device);
+            }
+            else {
+                fprintf(cp_out, "Printing %s on the %s printer OK.\n",
+                        fname, device);
+                printed = 1;
+            }
         }
 #endif
 #ifdef SYSTEM_PSLPR
@@ -175,9 +205,15 @@ com_hardcopy(wordlist *wl)
             if (!cp_getvar("lprps", CP_STRING, format, sizeof(format)))
                 strcpy(format, SYSTEM_PSLPR);
             (void) sprintf(buf, format, device, fname);
-            fprintf(cp_out, "Printing %s on the %s printer.\n", fname, device);
-            (void) system(buf);
-            printed = 1;
+            if (system(buf) == -1) {
+                fprintf(cp_out, "Printing %s on the %s printer failed.\n",
+                        fname, device);
+            }
+            else {
+                fprintf(cp_out, "Printing %s on the %s printer OK.\n",
+                        fname, device);
+                printed = 1;
+            }
         }
 #endif
     }
@@ -189,11 +225,13 @@ com_hardcopy(wordlist *wl)
                     fname);
             fprintf(cp_out,
                     "\tor by using the '-g' flag to the Unix lpr command.\n");
-        } else if (!strcmp(devtype, "postscript")) {
+        }
+        else if (!strcmp(devtype, "postscript")) {
             fprintf(cp_out,
                     "\nThe file \"%s\" may be printed on a postscript printer.\n",
                     fname);
-        } else if (!strcmp(devtype, "MFB")) {
+        }
+        else if (!strcmp(devtype, "MFB")) {
             fprintf(cp_out,
                     "The file \"%s\" may be printed on a MFB device.\n",
                     fname);
@@ -205,4 +243,7 @@ com_hardcopy(wordlist *wl)
 
     /* restore previous graphics context by retrieving the previous currentgraph */
     PopGraphContext();
-}
+} /* end of function com_hardcopy */
+
+
+

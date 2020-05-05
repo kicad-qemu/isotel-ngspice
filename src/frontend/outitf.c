@@ -34,6 +34,7 @@ Modified: 2000 AlansFixes, 2013/2015 patch by Krzysztof Blaszkowski
 
 extern char *spice_analysis_get_name(int index);
 extern char *spice_analysis_get_description(int index);
+extern int EVTsetup_plot(CKTcircuit* ckt, char* plotname);
 
 
 static int beginPlot(JOB *analysisPtr, CKTcircuit *circuitPtr, char *cktName, char *analName,
@@ -398,6 +399,11 @@ beginPlot(JOB *analysisPtr, CKTcircuit *circuitPtr, char *cktName, char *analNam
             plotInit(run);
             if (refName)
                 run->runPlot->pl_ndims = 1;
+#ifdef XSPICE
+            /* set the current plot name into the event job */
+            if (run->runPlot->pl_typename)
+                EVTsetup_plot(run->circuit, run->runPlot->pl_typename);
+#endif
         }
     }
 
@@ -565,21 +571,22 @@ OUTpData(runDesc *plotPtr, IFvalue *refValue, IFvalue *valuePtr)
 #ifdef TCL_MODULE
     steps_completed = run->pointCount;
 #endif
-    /* interpolated batch mode output to file in transient analysis */
-    if (interpolated && run->circuit->CKTcurJob->JOBtype == 4 && run->writeOut) {
-        InterpFileAdd(run, refValue, valuePtr);
-        return (OK);
+    /* interpolated batch mode output to file/plot in transient analysis */
+    if (interpolated && run->circuit->CKTcurJob->JOBtype == 4) {
+        if (run->writeOut) { /* To file */
+            InterpFileAdd(run, refValue, valuePtr);
+        }
+        else { /* To plot */
+            InterpPlotAdd(run, refValue, valuePtr);
+        }
+        return OK;
     }
-    /* interpolated interactive or control mode output to plot in transient analysis */
-    else if (interpolated && run->circuit->CKTcurJob->JOBtype == 4 && !(run->writeOut)) {
-        InterpPlotAdd(run, refValue, valuePtr);
-        return (OK);
-    }
+
     /* standard batch mode output to file */
     else if (run->writeOut) {
-
-        if (run->pointCount == 1)
+        if (run->pointCount == 1) {
             fileInit_pass2(run);
+        }
 
         fileStartPoint(run->fp, run->binary, run->pointCount);
 
@@ -600,10 +607,8 @@ OUTpData(runDesc *plotPtr, IFvalue *refValue, IFvalue *valuePtr)
                     }
                 }
 #endif
-            } else {
-
-                /*  And the same for a non-complex value  */
-
+            }
+            else { /* And the same for a non-complex (real) value  */
                 fileAddRealValue(run->fp, run->binary, refValue->rValue);
 #ifndef HAS_WINGUI
                 if (!orflag && !ft_norefprint) {
@@ -620,8 +625,9 @@ OUTpData(runDesc *plotPtr, IFvalue *refValue, IFvalue *valuePtr)
 
         for (i = 0; i < run->numData; i++) {
             /* we've already printed reference vec first */
-            if (run->data[i].outIndex == -1)
+            if (run->data[i].outIndex == -1) {
                 continue;
+            }
 
 #ifdef TCL_MODULE
             blt_add(i, refValue ? refValue->rValue : NAN);
@@ -630,13 +636,14 @@ OUTpData(runDesc *plotPtr, IFvalue *refValue, IFvalue *valuePtr)
             if (run->data[i].regular) {
                 if (run->data[i].type == IF_REAL)
                     fileAddRealValue(run->fp, run->binary,
-                                     valuePtr->v.vec.rVec [run->data[i].outIndex]);
+                            valuePtr->v.vec.rVec [run->data[i].outIndex]);
                 else if (run->data[i].type == IF_COMPLEX)
                     fileAddComplexValue(run->fp, run->binary,
-                                        valuePtr->v.vec.cVec [run->data[i].outIndex]);
+                            valuePtr->v.vec.cVec [run->data[i].outIndex]);
                 else
                     fprintf(stderr, "OUTpData: unsupported data type\n");
-            } else {
+            }
+            else {
                 IFvalue val;
                 /* should pre-check instance */
                 if (!getSpecial(&run->data[i], run, &val)) {
@@ -652,7 +659,8 @@ OUTpData(runDesc *plotPtr, IFvalue *refValue, IFvalue *valuePtr)
                         val.cValue.real = 0;
                         val.cValue.imag = 0;
                         fileAddComplexValue(run->fp, run->binary, val.cValue);
-                    } else {
+                    }
+                    else {
                         val.rValue = 0;
                         fileAddRealValue(run->fp, run->binary, val.rValue);
                     }
@@ -683,8 +691,8 @@ OUTpData(runDesc *plotPtr, IFvalue *refValue, IFvalue *valuePtr)
             shouldstop = TRUE;
         }
 
-    } else {
-
+    }
+    else {
         OUTpD_memory(run, refValue, valuePtr);
 
         /*  This is interactive mode. Update the screen with the reference
@@ -718,18 +726,18 @@ OUTpData(runDesc *plotPtr, IFvalue *refValue, IFvalue *valuePtr)
     sh_ExecutePerLoop();
 #endif
 
-    return (OK);
-}
+    return OK;
+} /* end of function OUTpData */
 
 
-int
-OUTwReference(void *plotPtr, IFvalue *valuePtr, void **refPtr)
+
+int OUTwReference(void *plotPtr, IFvalue *valuePtr, void **refPtr)
 {
     NG_IGNORE(refPtr);
     NG_IGNORE(valuePtr);
     NG_IGNORE(plotPtr);
 
-    return (OK);
+    return OK;
 }
 
 
@@ -741,7 +749,7 @@ OUTwData(runDesc *plotPtr, int dataIndex, IFvalue *valuePtr, void *refPtr)
     NG_IGNORE(dataIndex);
     NG_IGNORE(plotPtr);
 
-    return (OK);
+    return OK;
 }
 
 
@@ -750,7 +758,7 @@ OUTwEnd(runDesc *plotPtr)
 {
     NG_IGNORE(plotPtr);
 
-    return (OK);
+    return OK;
 }
 
 

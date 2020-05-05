@@ -65,7 +65,7 @@ ft_sigintr_cleanup(void)
 
     /* To restore screen after an interrupt to a plot for instance */
     cp_interactive = TRUE;
-    cp_resetcontrol();
+    cp_resetcontrol(TRUE);
 }
 
 
@@ -167,6 +167,13 @@ sigsegv(void)
     winmessage("Fatal error in NGSPICE");
 #endif
     fatal();
+}
+
+RETSIGTYPE
+sigsegvsh(void)
+{
+    fprintf(cp_err, "\ninternal error -- segmentation violation\n");
+    controlled_exit(EXIT_SEGV);
 }
 
 

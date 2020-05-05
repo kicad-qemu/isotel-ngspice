@@ -2,6 +2,7 @@
 Copyright 1990 Regents of the University of California.  All rights reserved.
 Author: 1985 Thomas L. Quarles
 Modified: 2000 AlansFixes
+VDMOS: 2018 Holger Vogt, 2020 Dietmar Warning
 **********/
 
 #ifndef VDMOS
@@ -41,53 +42,52 @@ typedef struct sVDMOSinstance {
     const int VDMOSdNode;  /* number of the gate node of the mosfet */
     const int VDMOSgNode;  /* number of the gate node of the mosfet */
     const int VDMOSsNode;  /* number of the source node of the mosfet */
+    int VDMOStempNode;  /* number of the temperature node of the mosfet */
+    int VDMOStcaseNode;  /* number of the 2nd temperature node of the mosfet */
     int VDMOSdNodePrime; /* number of the internal drain node of the mosfet */
     int VDMOSsNodePrime; /* number of the internal source node of the mosfet */
     int VDMOSgNodePrime; /* number of the internal gate node of the mosfet */
-    int VDIOposPrimeNode; /* number of the internal node of the bulk diode */
+    int VDMOStNodePrime; /* number of the internal temp node between voltage source and Rthca */
+    int VDIOposPrimeNode; /* number of the internal node of the body diode */
+
+    int VDMOSvcktTbranch; /* equation number of branch equation added for cktTemp source */ 
 
     double VDMOSm;   /* parallel device multiplier */
 
-    double VDMOSl;   /* the length of the channel region */
-    double VDMOSw;   /* the width of the channel region */
     double VDMOSsourceConductance;   /*conductance of source(or 0):set in setup*/
     double VDMOSdrainConductance;    /*conductance of drain(or 0):set in setup*/
+    double VDMOSdrainResistance;    /*resistance of drain(or 0): set in temp*/
+    double VDMOSqsResistance;    /*resistance of drain: set in temp*/
     double VDMOSgateConductance;    /*conductance of gate(or 0):set in setup*/
     double VDMOSdsConductance;    /*conductance of drain to source:set in setup*/
     double VDMOStemp;    /* operating temperature of this instance */
     double VDMOSdtemp;   /* operating temperature of the instance relative to circuit temperature*/
+    int    VDMOSthermal;  /* flag indicate self heating on */
 
     double VDMOStTransconductance;   /* temperature corrected transconductance*/
     double VDMOStPhi;                /* temperature corrected Phi */
-    double VDMOStVto;                /* temperature corrected Vto */
-    double VDMOStSatCur;             /* temperature corrected saturation Cur. */
+    double VDMOStVth;                /* temperature corrected Vth */
+    double VDMOStksubthres;          /* temperature weak inversion slope */
 
     double VDMOSicVDS;   /* initial condition D-S voltage */
     double VDMOSicVGS;   /* initial condition G-S voltage */
     double VDMOSvon;
     double VDMOSvdsat;
-    double VDMOSsourceVcrit; /* Vcrit for pos. vds */
-    double VDMOSdrainVcrit;  /* Vcrit for pos. vds */
     double VDMOScd;
     double VDMOSgm;
     double VDMOSgds;
-    double VDMOSf2d;
-    double VDMOSf3d;
-    double VDMOSf4d;
-    double VDMOSf2s;
-    double VDMOSf3s;
-    double VDMOSf4s;
 
     double VDIOcap;
-    double VDIOtSatCur; /* temperature corrected saturation Cur. density*/
+    double VDIOtSatCur;     /* temperature corrected saturation Cur. density*/
     double VDIOinitCond;
     double VDIOtVcrit;
+    double VDIOconductance;
     double VDIOtConductance;
     double VDIOtBrkdwnV;
     double VDIOtJctCap;
     double VDIOtDepCap;     /* temperature adjusted transition point in */
-                             /* the cureve matching Fc * Vj */
-    double VDIOtJctPot;    /* temperature corrected Bulk potential */
+                            /* the curve matching Fc * Vj */
+    double VDIOtJctPot;     /* temperature corrected junction potential */
     double VDIOtGradingCoeff;
 
     double VDIOtTransitTime;
@@ -95,6 +95,17 @@ typedef struct sVDMOSinstance {
     double VDIOtF2;
     double VDIOtF3;
 
+    double VDMOSTempSH;      /* for portability of SH temp to noise analysis */
+
+    double VDMOSgmT;
+    double VDMOSgtempg;
+    double VDMOSgtempd;
+    double VDMOSgtempT;
+    double VDMOScgT;
+    double VDMOScdT;
+    double VDMOScth;         /* current alias power */
+
+//    double VDIOdIth_dVdio;
 /*
  * naming convention:
  * x = vgs
@@ -135,109 +146,137 @@ typedef struct sVDMOSinstance {
 
     int VDMOSmode;       /* device mode : 1 = normal, -1 = inverse */
 
-
     unsigned VDMOSoff:1;  /* non-zero to indicate device is off for dc analysis*/
     unsigned VDMOStempGiven :1;  /* instance temperature specified */
     unsigned VDMOSdtempGiven :1;  /* instance delta temperature specified */
     unsigned VDMOSmGiven :1;
-    unsigned VDMOSlGiven :1;
-    unsigned VDMOSwGiven :1;
-    unsigned VDMOSdNodePrimeSet  :1;
-    unsigned VDMOSsNodePrimeSet  :1;
+    unsigned VDMOSdNodePrimeSet :1;
+    unsigned VDMOSsNodePrimeSet :1;
     unsigned VDMOSicVDSGiven :1;
     unsigned VDMOSicVGSGiven :1;
-    unsigned VDMOSvonGiven   :1;
+    unsigned VDMOSthermalGiven : 1; /* flag indicate self heating on */
+    unsigned VDMOSvonGiven : 1;
     unsigned VDMOSvdsatGiven :1;
-    unsigned VDMOSmodeGiven  :1;
-
+    unsigned VDMOSmodeGiven :1;
 
     double *VDMOSDdPtr;      /* pointer to sparse matrix element at
-                                     * (Drain node,drain node) */
+                                       (Drain node,drain node) */
     double *VDMOSGgPtr;      /* pointer to sparse matrix element at
-                                     * (gate node,gate node) */
+                                       (gate node,gate node) */
     double *VDMOSSsPtr;      /* pointer to sparse matrix element at
-                                     * (source node,source node) */
+                                       (source node,source node) */
     double *VDMOSDPdpPtr;    /* pointer to sparse matrix element at
-                                     * (drain prime node,drain prime node) */
+                                       (drain prime node,drain prime node) */
     double *VDMOSSPspPtr;    /* pointer to sparse matrix element at
-                                     * (source prime node,source prime node) */
+                                       (source prime node,source prime node) */
     double *VDMOSDdpPtr;     /* pointer to sparse matrix element at
-                                     * (drain node,drain prime node) */
+                                       (drain node,drain prime node) */
     double *VDMOSGdpPtr;     /* pointer to sparse matrix element at
-                                     * (gate node,drain prime node) */
+                                       (gate node,drain prime node) */
     double *VDMOSGspPtr;     /* pointer to sparse matrix element at
-                                     * (gate node,source prime node) */
+                                       (gate node,source prime node) */
     double *VDMOSSspPtr;     /* pointer to sparse matrix element at
-                                     * (source node,source prime node) */
+                                       (source node,source prime node) */
     double *VDMOSDPspPtr;    /* pointer to sparse matrix element at
-                                     * (drain prime node,source prime node) */
+                                       (drain prime node,source prime node) */
     double *VDMOSDPdPtr;     /* pointer to sparse matrix element at
-                                     * (drain prime node,drain node) */
+                                       (drain prime node,drain node) */
     double *VDMOSDPgPtr;     /* pointer to sparse matrix element at
-                                     * (drain prime node,gate node) */
+                                       (drain prime node,gate node) */
 
     double *VDMOSSPgPtr;     /* pointer to sparse matrix element at
-                                     * (source prime node,gate node) */
+                                       (source prime node,gate node) */
     double *VDMOSSPsPtr;     /* pointer to sparse matrix element at
-                                     * (source prime node,source node) */
+                                       (source prime node,source node) */
     double *VDMOSSPdpPtr;    /* pointer to sparse matrix element at
-                                     * (source prime node,drain prime node) */
+                                       (source prime node,drain prime node) */
     /* added for VDMOS */
     double *VDMOSGPgpPtr;    /* pointer to sparse matrix element at
-                             * (gate prime node, gate prime node) */
+                               (gate prime node, gate prime node) */
     double *VDMOSGPdpPtr;    /* pointer to sparse matrix element at
-                             * (gate prime node, drain prime node) */
+                               (gate prime node, drain prime node) */
     double *VDMOSGPspPtr;    /* pointer to sparse matrix element at
-                             * (gate prime node, source prime node) */
+                               (gate prime node, source prime node) */
     double *VDMOSDPgpPtr;    /* pointer to sparse matrix element at
-                             * (drain prime node, gate prime node) */
+                               (drain prime node, gate prime node) */
     double *VDMOSSPgpPtr;    /* pointer to sparse matrix element at
-                             * (source prime node, gate prime node) */
+                               (source prime node, gate prime node) */
     double *VDMOSGgpPtr;    /* pointer to sparse matrix element at
-                             * (gate node, gate prime node) */
+                               (gate node, gate prime node) */
     double *VDMOSGPgPtr;    /* pointer to sparse matrix element at
-                             * (gate prime node, gate node) */
+                               (gate prime node, gate node) */
     double *VDMOSDsPtr;    /* pointer to sparse matrix element at
-                             * (source node, drain node) */
+                               (source node, drain node) */
     double *VDMOSSdPtr;    /* pointer to sparse matrix element at
-                             * (drain node, source node) */
-    /* bulk diode */
+                               (drain node, source node) */
+    /* body diode */
     double *VDIORPdPtr;    /* pointer to sparse matrix element at
-                             * (diode prime node, drain node) */
+                               (diode prime node, drain node) */
     double *VDIODrpPtr;    /* pointer to sparse matrix element at
-                             * (drain node, diode prime node) */
+                               (drain node, diode prime node) */
     double *VDIORPrpPtr;    /* pointer to sparse matrix element at
-                             * (diode prime node, diode prime node) */
+                               (diode prime node, diode prime node) */
     double *VDIOSrpPtr;    /* pointer to sparse matrix element at
-                            * (source node, diode prime node) */
+                              (source node, diode prime node) */
     double *VDIORPsPtr;    /* pointer to sparse matrix element at
-                            * (diode prime node, source node) */
+                              (diode prime node, source node) */
+    /* self heating */
+    double *VDMOSTemptempPtr;   /* Transistor thermal contribution */
+    double *VDMOSTempdpPtr;
+    double *VDMOSTempspPtr;
+    double *VDMOSTempgpPtr;
+    double *VDMOSGPtempPtr;
+    double *VDMOSDPtempPtr;
+    double *VDMOSSPtempPtr;
+
+    double *VDIOTempposPrimePtr; /* Diode thermal contribution */
+    double *VDIOTempnegPtr;
+    double *VDIOPosPrimetempPtr;
+    double *VDIONegtempPtr;
+
+    double *VDMOSTcasetcasePtr; /* for Rthjc */
+    double *VDMOSTcasetempPtr;
+    double *VDMOSTemptcasePtr;
+    double *VDMOSTptpPtr;       /* for Rthca */
+    double *VDMOSTptcasePtr;
+    double *VDMOSTcasetpPtr;
+    double *VDMOSCktTcktTPtr;   /* for VcktTemp */
+    double *VDMOSCktTtpPtr;
+    double *VDMOSTpcktTPtr;
 
 } VDMOSinstance ;
 
 #define VDMOSvgs VDMOSstates+ 0   /* gate-source voltage */
 #define VDMOSvds VDMOSstates+ 1   /* drain-source voltage */
+#define VDMOSdelTemp VDMOSstates+ 2 /* thermal voltage over rth0 */
 
-#define VDMOScapgs VDMOSstates+2  /* gate-source capacitor value */
-#define VDMOSqgs VDMOSstates+ 3   /* gate-source capacitor charge */
-#define VDMOScqgs VDMOSstates+ 4  /* gate-source capacitor current */
+#define VDMOScapgs VDMOSstates+3  /* gate-source capacitor value */
+#define VDMOSqgs VDMOSstates+ 4   /* gate-source capacitor charge */
+#define VDMOScqgs VDMOSstates+ 5  /* gate-source capacitor current */
 
-#define VDMOScapgd VDMOSstates+ 5 /* gate-drain capacitor value */
-#define VDMOSqgd VDMOSstates+ 6   /* gate-drain capacitor charge */
-#define VDMOScqgd VDMOSstates+ 7  /* gate-drain capacitor current */
+#define VDMOScapgd VDMOSstates+ 6 /* gate-drain capacitor value */
+#define VDMOSqgd VDMOSstates+ 7   /* gate-drain capacitor charge */
+#define VDMOScqgd VDMOSstates+ 8  /* gate-drain capacitor current */
 
-#define VDIOvoltage VDMOSstates+ 8
-#define VDIOcurrent VDMOSstates+ 9
-#define VDIOconduct VDMOSstates+ 10
-#define VDIOcapCharge VDMOSstates+ 11
-#define VDIOcapCurrent VDMOSstates+ 12
+#define VDIOvoltage VDMOSstates+ 9
+#define VDIOcurrent VDMOSstates+ 10
+#define VDIOconduct VDMOSstates+ 11
 
-#define VDMOSnumStates 13
+#define VDIOcapCharge VDMOSstates+ 12
+#define VDIOcapCurrent VDMOSstates+ 13
+
+#define VDMOScapth VDMOSstates+ 14 /* thermal capacitor value */
+#define VDMOSqth VDMOSstates+ 15   /* thermal capacitor charge */
+#define VDMOScqth VDMOSstates+ 16  /* thermal capacitor current */
+
+#define VDIOdIdio_dT VDMOSstates+ 17
+
+#define VDMOSnumStates 18
 
 
 /* per model data */
 
-    /* NOTE:  parameters marked 'input - use xxxx' are paramters for
+    /* NOTE:  parameters marked 'input - use xxxx' are parameters for
      * which a temperature correction is applied in VDMOStemp, thus
      * the VDMOSxxxx value in the per-instance structure should be used
      * instead in all calculations 
@@ -262,7 +301,7 @@ typedef struct sVDMOSmodel {       /* model structure for a resistor */
     double VDMOSqsVoltage;
     double VDMOStransconductance;    /* input - use tTransconductance */
     double VDMOSoxideCapFactor;
-    double VDMOSvt0; /* input - use tVto */
+    double VDMOSvth0; /* input - use tVth */
     double VDMOSphi; /* input - use tPhi */
     double VDMOSlambda;
     double VDMOStheta;
@@ -273,33 +312,53 @@ typedef struct sVDMOSmodel {       /* model structure for a resistor */
     double VDMOScgdmax;
     double VDMOSa;
     double VDMOScgs;
-    double VDMOSsubsl;
     double VDMOSsubshift;
     double VDMOSksubthres;
     double VDMOSmtr;
 
-    /* bulk diode */
+    /* body diode */
     double VDIOjunctionCap;   /* input - use tCj */
-    double VDIOjunctionPot;    /* input - use tBulkPot */
+    double VDIOjunctionPot;    /* input - use tJctPot */
     double VDIOdepletionCapCoeff;
     double VDIOjctSatCur;   /* input - use tSatCur */
-    double VDMOSDbv;
-    double VDMOSDibv;
+    double VDMOSbv;
+    double VDMOSibv;
     double VDIObrkdEmissionCoeff;
     double VDIOresistance;
-    double VDIOresistTemp1;
-    double VDIOresistTemp2;
-    double VDIOconductance;
     double VDMOSrds;
-    double VDMOSDn;
+    double VDMOSn;
     double VDIOtransitTime;
     double VDIOtranTimeTemp1;
     double VDIOtranTimeTemp2;
-    double VDMOSDeg;
-    double VDMOSDxti;
+    double VDMOSeg;
+    double VDMOSxti;
     double VDIOgradCoeff;
     double VDIOgradCoeffTemp1;
     double VDIOgradCoeffTemp2;
+
+    double VDMOStcvth;
+    double VDMOSrthjc;
+    double VDMOSrthca;
+    double VDMOScthj;
+    double VDMOSmu;
+    double VDMOStexp0;
+    double VDMOStexp1;
+    double VDMOStrd1;
+    double VDMOStrd2;
+    double VDMOStrg1;
+    double VDMOStrg2;
+    double VDMOStrs1;
+    double VDMOStrs2;
+    double VDMOStrb1;
+    double VDMOStrb2;
+    double VDMOStksubthres1;
+    double VDMOStksubthres2;
+
+    double VDMOSvgsMax;
+    double VDMOSvgdMax;
+    double VDMOSvdsMax;
+    double VDMOSvgsrMax;
+    double VDMOSvgdrMax;
 
     unsigned VDMOStypeGiven  :1;
     unsigned VDIOjctSatCurGiven :1;
@@ -310,7 +369,7 @@ typedef struct sVDMOSmodel {       /* model structure for a resistor */
     unsigned VDMOSqsVoltageGiven    :1;
     unsigned VDMOSqsGiven    :1;
     unsigned VDMOStransconductanceGiven  :1;
-    unsigned VDMOSvt0Given   :1;
+    unsigned VDMOSvth0Given   :1;
     unsigned VDIOgradCoeffGiven    :1;
     unsigned VDIOdepletionCapCoeffGiven :1;
     unsigned VDMOSphiGiven   :1;
@@ -324,23 +383,45 @@ typedef struct sVDMOSmodel {       /* model structure for a resistor */
     unsigned VDMOScgdmaxGiven   :1;
     unsigned VDMOScgsGiven   :1;
     unsigned VDMOSaGiven   :1;
-    unsigned VDMOSsubslGiven   :1;
     unsigned VDMOSsubshiftGiven   :1;
     unsigned VDMOSksubthresGiven :1;
     unsigned VDMOSmtrGiven   :1;
 
-    unsigned VDMOSDbvGiven   :1;
-    unsigned VDMOSDibvGiven   :1;
+    unsigned VDMOSbvGiven   :1;
+    unsigned VDMOSibvGiven   :1;
     unsigned VDIOjunctionCapGiven :1;
     unsigned VDIOjunctionPotGiven :1;
     unsigned VDIObrkdEmissionCoeffGiven :1;
     unsigned VDIOresistanceGiven :1;
     unsigned VDMOSrdsGiven   :1;
-    unsigned VDMOSDnGiven   :1;
+    unsigned VDMOSnGiven   :1;
     unsigned VDIOtransitTimeGiven :1;
-    unsigned VDMOSDegGiven   :1;
-    unsigned VDMOSDxtiGiven   :1;
+    unsigned VDMOSegGiven   :1;
+    unsigned VDMOSxtiGiven   :1;
 
+    unsigned VDMOStcvthGiven :1;
+    unsigned VDMOSrthjcGiven :1;
+    unsigned VDMOSrthcaGiven :1;
+    unsigned VDMOScthjGiven :1;
+    unsigned VDMOSmuGiven :1;
+    unsigned VDMOStexp0Given :1;
+    unsigned VDMOStexp1Given :1;
+    unsigned VDMOStrd1Given :1;
+    unsigned VDMOStrd2Given :1;
+    unsigned VDMOStrg1Given :1;
+    unsigned VDMOStrg2Given :1;
+    unsigned VDMOStrs1Given :1;
+    unsigned VDMOStrs2Given :1;
+    unsigned VDMOStrb1Given :1;
+    unsigned VDMOStrb2Given :1;
+    unsigned VDMOStksubthres1Given :1;
+    unsigned VDMOStksubthres2Given :1;
+
+    unsigned VDMOSvgsMaxGiven  :1;
+    unsigned VDMOSvgdMaxGiven  :1;
+    unsigned VDMOSvdsMaxGiven  :1;
+    unsigned VDMOSvgsrMaxGiven  :1;
+    unsigned VDMOSvgdrMaxGiven  :1;
 } VDMOSmodel;
 
 #ifndef NMOS
@@ -350,9 +431,7 @@ typedef struct sVDMOSmodel {       /* model structure for a resistor */
 
 /* device parameters */
 enum {
-    VDMOS_W = 1,
-    VDMOS_L,
-    VDMOS_OFF,
+    VDMOS_OFF = 1,
     VDMOS_IC,
     VDMOS_IC_VDS,
     VDMOS_IC_VGS,
@@ -362,11 +441,12 @@ enum {
     VDMOS_TEMP,
     VDMOS_M,
     VDMOS_DTEMP,
+    VDMOS_THERMAL,
 };
 
-/* model paramerers */
+/* model parameters */
 enum {
-    VDMOS_MOD_VTO = 101,
+    VDMOS_MOD_VTH = 101,
     VDMOS_MOD_KP,
     VDMOS_MOD_PHI,
     VDMOS_MOD_LAMBDA,
@@ -394,7 +474,6 @@ enum {
     VDMOS_MOD_CGS,
     VDMOS_MOD_RB,
     VDMOS_MOD_MTRIODE,
-    VDMOS_MOD_SUBSLOPE,
     VDMOS_MOD_SUBSHIFT,
     VDMOS_MOD_KSUBTHRES,
     VDMOS_MOD_BV,
@@ -405,6 +484,28 @@ enum {
     VDMOS_MOD_TT,
     VDMOS_MOD_EG,
     VDMOS_MOD_XTI,
+    VDMOS_MOD_TCVTH,
+    VDMOS_MOD_RTHJC,
+    VDMOS_MOD_RTHCA,
+    VDMOS_MOD_CTHJ,
+    VDMOS_MOD_MU,
+    VDMOS_MOD_TEXP0,
+    VDMOS_MOD_TEXP1,
+    VDMOS_MOD_TRD1,
+    VDMOS_MOD_TRD2,
+    VDMOS_MOD_TRG1,
+    VDMOS_MOD_TRG2,
+    VDMOS_MOD_TRS1,
+    VDMOS_MOD_TRS2,
+    VDMOS_MOD_TRB1,
+    VDMOS_MOD_TRB2,
+    VDMOS_MOD_TKSUBTHRES1,
+    VDMOS_MOD_TKSUBTHRES2,
+    VDMOS_MOD_VGS_MAX,
+    VDMOS_MOD_VGD_MAX,
+    VDMOS_MOD_VDS_MAX,
+    VDMOS_MOD_VGSR_MAX,
+    VDMOS_MOD_VGDR_MAX,
 };
 
 /* device questions */
@@ -415,14 +516,13 @@ enum {
     VDMOS_DNODE,
     VDMOS_GNODE,
     VDMOS_SNODE,
+    VDMOS_TNODE,
+    VDMOS_TCASE,
     VDMOS_DNODEPRIME,
     VDMOS_SNODEPRIME,
     VDMOS_SOURCECONDUCT,
     VDMOS_DRAINCONDUCT,
     VDMOS_VON,
-    VDMOS_VDSAT,
-    VDMOS_SOURCEVCRIT,
-    VDMOS_DRAINVCRIT,
     VDMOS_CD,
     VDMOS_GM,
     VDMOS_GDS,
@@ -432,6 +532,7 @@ enum {
     VDMOS_CQGS,
     VDMOS_QGD,
     VDMOS_CQGD,
+    VDMOS_CDIO,
     VDMOS_SOURCERESIST,
     VDMOS_DRAINRESIST,
 };

@@ -41,7 +41,7 @@ struct comm {
     int co_maxargs;
 
     /* The fn that prompts the user. */
-    void (*co_argfn) (wordlist *wl, struct comm *command);
+    void (*co_argfn)(const wordlist *wl, const struct comm *command);
 
     /* When these are printed, printf(string, av[0]) .. */
     char *co_help;
@@ -83,11 +83,6 @@ struct alias {
     struct alias *al_next;
     struct alias *al_prev;
 } ;
-
-/* The current record of what characters are special. */
-
-#define CPC_BRR  004 /* Break word to right of character. */
-#define CPC_BRL  010 /* Break word to left of character. */
 
 
 #define CT_ALIASES  1

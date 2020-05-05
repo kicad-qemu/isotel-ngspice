@@ -27,6 +27,10 @@ Author: 1985 Wayne A. Christopher, U. C. Berkeley CAD Group
 
 #include "ngspice/inpdefs.h"
 
+#if defined(XSPICE) && defined(SIMULATOR)
+#include "ngspice/evtproto.h"
+#endif
+
 extern void line_free_x(struct card *deck, bool recurse);
 extern INPmodel *modtab;
 
@@ -169,32 +173,12 @@ com_rset(wordlist *wl)
 {
     NG_IGNORE(wl);
 
-#if (1)
     if (ft_curckt == NULL) {
         fprintf(cp_err, "Error: there is no circuit loaded.\n");
         return;
     }
     com_remcirc(NULL);
     inp_source_recent();
-#else
-    struct variable *v, *next;
-
-    if (ft_curckt == NULL) {
-        fprintf(cp_err, "Error: there is no circuit loaded.\n");
-        return;
-    }
-    INPkillMods();
-
-    if_cktfree(ft_curckt->ci_ckt, ft_curckt->ci_symtab);
-    for (v = ft_curckt->ci_vars; v; v = next) {
-        next = v->va_next;
-        tfree(v);
-    }
-    ft_curckt->ci_vars = NULL;
-
-    inp_dodeck(ft_curckt->ci_deck, ft_curckt->ci_name, NULL,
-               TRUE, ft_curckt->ci_options, ft_curckt->ci_filename);
-#endif
 }
 
 
@@ -205,9 +189,6 @@ com_remcirc(wordlist *wl)
     struct variable *v, *next;
     struct card *dd;     /*in: the spice deck */
     struct circ *p, *prev = NULL;
-#ifdef SHARED_MODULE
-    TRANan *job;
-#endif
 
     NG_IGNORE(wl);
 
@@ -215,15 +196,6 @@ com_remcirc(wordlist *wl)
         fprintf(cp_err, "Error: there is no circuit loaded.\n");
         return;
     }
-
-#ifdef SHARED_MODULE
-    /* This may happen only with shared ngspice during transient analysis,
-       if simulation is stopped with 'bg_halt'
-       and then circuit shall be removed prematurely. */
-    job = (TRANan *) ft_curckt->ci_ckt->CKTcurJob;
-    if (job && (job->JOBtype == 4) && (job->TRANplot))
-        SPfrontEnd->OUTendPlot (job->TRANplot);
-#endif
 
     /* delete numparam data structure dicoS */
     nupa_del_dicoS();
@@ -236,6 +208,12 @@ com_remcirc(wordlist *wl)
 
     /* The next lines stem from com_rset */
     INPkillMods();
+
+#if defined(XSPICE) && defined(SIMULATOR)
+    /* remove event queues, if XSPICE and not nutmeg */
+    if (ft_curckt->ci_ckt)
+        EVTunsetup(ft_curckt->ci_ckt);
+#endif
 
     if_cktfree(ft_curckt->ci_ckt, ft_curckt->ci_symtab);
     for (v = ft_curckt->ci_vars; v; v = next) {
