@@ -12,13 +12,15 @@ PROJECT A-8503-405
 
 AUTHORS
 
-    24 Apr 1991     Jeffrey P. Murray
+    24 Apr 1991    Jeffrey P. Murray
+    27 Sep 2020    Uros Platise
 
 
 MODIFICATIONS
 
     24 Apr 1991    Jeffrey P. Murray
     26 Sep 1991    Jeffrey P. Murray
+    27 Sep 2020    Uros Platise
 
 
 SUMMARY
@@ -59,6 +61,7 @@ NON-STANDARD FEATURES
 #define X_FALLING FALSE
 #define PWL 1
 #define HYSTERESIS 2
+#define PLATISE 3
 
 
 /*=== MACROS ===========================*/
@@ -172,7 +175,23 @@ NON-STANDARD FEATURES
 /*  tailoring of the response as is possible in the pwl mode.      */
 /*                                                                 */
 /*  4/24/91                                             J.P.Murray */
-/*  Last modified: 10/24/91                                        */
+/*                                                                 */
+/*                         Platise Mode                            */
+/*                                                                 */
+/*     In Platise mode, the core model is described by two params  */
+/*  only, the saturation point Bs [T] and magnetic dipole momentum */
+/*  Hm [A/m], which field strength can be read at 0.71 Bs from the */
+/*  data-sheet.                                                    */
+/*                                                                 */
+/*  Bs and Hm are given as first parameters within the b_array and */
+/*  h_array. The rest of the fields are ignored in this mode.      */
+/*  This mode is automatically selected when arrays contain single */
+/*  elements (Bs and Hm).                                          */
+/*                                                                 */
+/*  It provides smooth function with continuous derivative.        */
+/*  This model does not (yet) include hysteresis.                  */
+/*                                                                 */
+/*  Last modified: 9/27/2020                                       */
 /*******************************************************************/
 
 void
@@ -248,7 +267,7 @@ cm_core(ARGS)
 
     /** Based on mode value, switch to the appropriate model code... **/
 
-    if (HYSTERESIS != mode) {   /******** pwl mode *****************/
+    if (HYSTERESIS != mode) {   /******** pwl/platise modes *****************/
 
         /* Retrieve frequently used parameters... */
 
@@ -276,9 +295,20 @@ cm_core(ARGS)
         /* Calculate H_input value from mmf_input... */
         H_input = mmf_input / length;
 
-        /* Determine segment boundaries within which H_input resides */
+            /* Platise model based on B_sat in B[0] and dipol H_momentum in H[0]*/
 
-        if (H_input <= (H[1].rvalue + H[0].rvalue) / 2.0) {/*** H_input below lowest midpoint ***/
+        if (size == 1 || mode == PLATISE) {
+            double H2       = H_input*H_input;
+            double Hm2      = H[0].rvalue*H[0].rvalue;
+            double HHm2     = H2 + Hm2;
+            double HHm2sqrt = sqrt( HHm2 );
+
+            dout_din = B[0].rvalue * Hm2 * HHm2sqrt / (HHm2 * HHm2);
+            B_out    = B[0].rvalue * H_input / HHm2sqrt;
+        }
+            /* Determine segment boundaries within which H_input resides */
+
+        else if (H_input <= (H[1].rvalue + H[0].rvalue) / 2.0) {/*** H_input below lowest midpoint ***/
 
             dout_din = (B[1].rvalue - B[0].rvalue) / (H[1].rvalue - H[0].rvalue);
             B_out = B[0].rvalue + (H_input - H[0].rvalue) * dout_din;
