@@ -3,11 +3,10 @@ FILE  writ_ifs.c
 
 MEMBER OF process cmpp
 
-Copyright 1991
+Public Domain
+
 Georgia Tech Research Corporation
 Atlanta, Georgia 30332
-All Rights Reserved
-
 PROJECT A-8503
 
 AUTHORS
@@ -1017,7 +1016,7 @@ static int write_SPICEdev(
             "    .DEVfindBranch = NULL,\n"
             "    .DEVacLoad = MIFload,\n"
             "    .DEVaccept = NULL,\n"
-            "    .DEVdestroy = MIFdestroy,\n"
+            "    .DEVdestroy = NULL,\n"
             "    .DEVmodDelete = MIFmDelete,\n"
             "    .DEVdelete = MIFdelete,\n"
             "    .DEVsetic = NULL,\n"

@@ -229,37 +229,10 @@ DCtran(CKTcircuit *ckt,
         if(converged != 0) {
             fprintf(stdout,"\nTransient solution failed -\n");
             CKTncDump(ckt);
-/*          CKTnode *node;
-            double new, old, tol;
-            int i=1;
-
-            fprintf(stdout,"\nTransient solution failed -\n\n");
-            fprintf(stdout,"Last Node Voltages\n");
-            fprintf(stdout,"------------------\n\n");
-            fprintf(stdout,"%-30s %20s %20s\n", "Node", "Last Voltage",
-                                                               "Previous Iter");
-            fprintf(stdout,"%-30s %20s %20s\n", "----", "------------",
-                                                               "-------------");
-            for(node=ckt->CKTnodes->next;node;node=node->next) {
-                if (strstr(node->name, "#branch") || !strchr(node->name, '#')) {
-                    new =  ckt->CKTrhsOld [i] ;
-                    old =  ckt->CKTrhs [i] ;
-                    fprintf(stdout,"%-30s %20g %20g", node->name, new, old);
-                    if(node->type == SP_VOLTAGE) {
-                        tol =  ckt->CKTreltol * (MAX(fabs(old),fabs(new))) +
-                                ckt->CKTvoltTol;
-                    } else {
-                        tol =  ckt->CKTreltol * (MAX(fabs(old),fabs(new))) +
-                                ckt->CKTabstol;
-                    }
-                    if (fabs(new-old) >tol ) {
-                        fprintf(stdout," *");
-                    }
-                    fprintf(stdout,"\n");
-                }
-                i++;
-            } */
             fprintf(stdout,"\n");
+            fflush(stdout);
+        } else if (ckt->CKTmode & MODEUIC) {
+            fprintf(stdout,"Using transient initial conditions\n");
             fflush(stdout);
         } else if (!ft_noacctprint && !ft_noinitprint) {
             fprintf(stdout,"\nInitial Transient Solution\n");
@@ -481,7 +454,7 @@ DCtran(CKTcircuit *ckt,
 #ifdef CLUSTER
         CLUoutput(ckt);
 #endif
-        if(ckt->CKTtime >= ckt->CKTinitTime)
+        if((ckt->CKTmode&MODEUIC && ckt->CKTtime > 0) || (!(ckt->CKTmode&MODEUIC) && ckt->CKTtime >= ckt->CKTinitTime))
             CKTdump(ckt, ckt->CKTtime, job->TRANplot);
 #ifdef XSPICE
 /* gtri - begin - wbk - Update event queues/data for accepted timepoint */
@@ -808,7 +781,7 @@ resume:
 #endif
             ckt->CKTdelta = ckt->CKTdelta/8;
 #ifdef STEPDEBUG
-            (void)printf("delta cut to %g for non-convergance\n",ckt->CKTdelta);
+            (void)printf("delta cut to %g for non-convergence\n",ckt->CKTdelta);
             fflush(stdout);
 #endif
             if(firsttime) {

@@ -3,8 +3,13 @@
 
 FILE table3D/cfunc.mod
 
-Copyright 2015
-Holger Vogt
+-------------------------------------------------------------------------
+ Copyright 2015
+ The ngspice team
+ All Rights Reserved
+ GPL
+ (see COPYING or https://opensource.org/licenses/BSD-3-Clause)
+-------------------------------------------------------------------------
 
   This program is free software; you can redistribute it and/or modify
   it under the terms of the GNU General Public License as published by
@@ -113,9 +118,8 @@ typedef Table3_Data_t Local_Data_t;
 
 /*=== FUNCTION PROTOTYPE DEFINITIONS ===*/
 
-extern char *CNVgettok(char **s);
+extern double BilinearInterpolation(double x, double y, int xind, int yind, double **td); 
 extern double TrilinearInterpolation(double x, double y, double z, int xind, int yind, int zind, double ***td);
-int cnv_get_spice_value(char *str, double *p_value);
 extern int findCrossOver(double arr[], int n, double x);
 
 static void free_local_data(Table3_Data_t *loc);
@@ -528,7 +532,7 @@ static Table3_Data_t *init_local_data(const char *filename, int interporder)
             /* generate  column data structure (y) */
             if ((loc->ycol = (double *) calloc((size_t) iy,
                     sizeof(double))) == (double *) NULL) {
-                cm_message_printf("Unable to allocate colum structure.");
+                cm_message_printf("Unable to allocate column structure.");
                 xrc = -1;
                 goto EXITPOINT;
             }

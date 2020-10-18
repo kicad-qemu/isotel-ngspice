@@ -31,17 +31,20 @@ VDMOSsetup(SMPmatrix *matrix, GENmodel *inModel, CKTcircuit *ckt,
         if (!model->VDMOStypeGiven)
             model->VDMOStype = NMOS;
 
-        if (!model->VDIOjctSatCurGiven)
-            model->VDIOjctSatCur = 1e-14;
-
         if (!model->VDMOStransconductanceGiven)
             model->VDMOStransconductance = 1;
 
         if (!model->VDMOSvth0Given)
             model->VDMOSvth0 = 0;
 
+        if (!model->VDIOjctSatCurGiven)
+            model->VDIOjctSatCur = 1e-14;
+
         if (!model->VDIOjunctionPotGiven)
             model->VDIOjunctionPot = .8;
+
+        if (!model->VDIOjunctionCapGiven)
+            model->VDIOjunctionCap = 0.;
 
         if (!model->VDIOgradCoeffGiven)
             model->VDIOgradCoeff = .5;
@@ -85,23 +88,23 @@ VDMOSsetup(SMPmatrix *matrix, GENmodel *inModel, CKTcircuit *ckt,
         if (!model->VDMOSmtrGiven)
             model->VDMOSmtr = 1.;
 
-        if (!model->VDMOSbvGiven)
-            model->VDMOSbv = 1.0e30;
+        if (!model->VDIObvGiven)
+            model->VDIObv = 1.0e30;
 
-        if (!model->VDMOSibvGiven)
-            model->VDMOSibv = 1.0e-10;
+        if (!model->VDIOibvGiven)
+            model->VDIOibv = 1.0e-10;
 
         if (!model->VDIObrkdEmissionCoeffGiven)
             model->VDIObrkdEmissionCoeff = 1.;
 
         if (!model->VDMOSdrainResistanceGiven)
-            model->VDMOSdrainResistance = 1.0e-03;
+            model->VDMOSdrainResistance = 0.0;
 
         if (!model->VDMOSsourceResistanceGiven)
-            model->VDMOSsourceResistance = 1.0e-03;
+            model->VDMOSsourceResistance = 0.0;
 
         if (!model->VDMOSgateResistanceGiven)
-            model->VDMOSgateResistance = 1.0e-03;
+            model->VDMOSgateResistance = 0.0;
 
         if (!model->VDMOSrdsGiven)
             model->VDMOSrds = 1.0e+15;
@@ -109,14 +112,17 @@ VDMOSsetup(SMPmatrix *matrix, GENmodel *inModel, CKTcircuit *ckt,
         if (!model->VDIOresistanceGiven)
             model->VDIOresistance = 10e-03;
 
-        if (!model->VDMOSnGiven)
-            model->VDMOSn = 1.;
+        if (!model->VDIOnGiven)
+            model->VDIOn = 1.;
 
         if (!model->VDIOtransitTimeGiven)
             model->VDIOtransitTime = 0.;
 
-        if (!model->VDMOSegGiven)
-            model->VDMOSeg = 1.11;
+        if (!model->VDIOegGiven)
+            model->VDIOeg = 1.11;
+
+        if (!model->VDIOxtiGiven)
+            model->VDIOxti = 3.0;
 
         if (!model->VDMOSrthjcGiven)
             model->VDMOSrthjc = 1.0e-03;
@@ -157,11 +163,11 @@ VDMOSsetup(SMPmatrix *matrix, GENmodel *inModel, CKTcircuit *ckt,
         if (!model->VDMOStrs2Given)
             model->VDMOStrs2 = 0.0;
 
-        if (!model->VDMOStrb1Given)
-            model->VDMOStrb1 = 0.0;
+        if (!model->VDIOtrb1Given)
+            model->VDIOtrb1 = 0.0;
 
-        if (!model->VDMOStrb2Given)
-            model->VDMOStrb2 = 0.0;
+        if (!model->VDIOtrb2Given)
+            model->VDIOtrb2 = 0.0;
 
         if (!model->VDMOStksubthres1Given)
             model->VDMOStksubthres1 = 0.0;
@@ -189,6 +195,38 @@ VDMOSsetup(SMPmatrix *matrix, GENmodel *inModel, CKTcircuit *ckt,
         else
             model->VDMOSqsGiven = 0;
 
+        if(!model->VDMOStnomGiven) {
+            model->VDMOStnom = ckt->CKTnomTemp;
+        }
+
+        /* now model parameter preprocessing */
+        if (model->VDMOSphi <= 0.0) {
+            SPfrontEnd->IFerrorf(ERR_FATAL,
+                "%s: Phi is not positive.", model->VDMOSmodName);
+            return(E_BADPARM);
+        }
+
+        model->VDMOSoxideCapFactor = 3.9 * 8.854214871e-12 / 1e-07; /* use default Tox of 100nm */
+
+        /* body diode model */
+        /* limit activation energy to min of .1 */
+        if (model->VDIOeg<.1) {
+            SPfrontEnd->IFerrorf(ERR_WARNING,
+                "%s: body diode activation energy too small, limited to 0.1",
+                model->VDMOSmodName);
+            model->VDIOeg = .1;
+        }
+        /* limit depletion cap coeff to max of .95 */
+        if (model->VDIOdepletionCapCoeff>.95) {
+            SPfrontEnd->IFerrorf(ERR_WARNING,
+                "%s: coefficient Fc too large, limited to 0.95",
+                model->VDMOSmodName);
+            model->VDIOdepletionCapCoeff = .95;
+        }
+        /* set lower limit of saturation current */
+        if (model->VDIOjctSatCur < ckt->CKTepsmin)
+            model->VDIOjctSatCur = ckt->CKTepsmin;
+
         /* loop through all the instances of the model */
         for (here = VDMOSinstances(model); here != NULL;
             here = VDMOSnextInstance(here)) {
@@ -212,20 +250,20 @@ VDMOSsetup(SMPmatrix *matrix, GENmodel *inModel, CKTcircuit *ckt,
             if(!here->VDMOSmGiven) {
                 here->VDMOSm = 1;
             }
-            if (model->VDMOSdrainResistance != 0) {
+            if (model->VDMOSdrainResistance > 0) {
                 here->VDMOSdrainConductance = here->VDMOSm / model->VDMOSdrainResistance;
             } else {
-                here->VDMOSdrainConductance = here->VDMOSm / 1.0e-03;
+                here->VDMOSdrainConductance = 0.0;
             }
-            if (model->VDMOSsourceResistance != 0) {
+            if (model->VDMOSsourceResistance > 0) {
                 here->VDMOSsourceConductance = here->VDMOSm / model->VDMOSsourceResistance;
             } else {
-                here->VDMOSsourceConductance = here->VDMOSm / 1.0e-03;
+                here->VDMOSsourceConductance = 0.0;
             }
-            if (model->VDMOSgateResistance != 0) {
+            if (model->VDMOSgateResistance > 0) {
                 here->VDMOSgateConductance = here->VDMOSm / model->VDMOSgateResistance;
             } else {
-                here->VDMOSgateConductance = here->VDMOSm / 1.0e-03;
+                here->VDMOSgateConductance = 0.0;
             }
             if (model->VDMOSrdsGiven) {
                 if (model->VDMOSrds != 0) {
@@ -242,7 +280,7 @@ VDMOSsetup(SMPmatrix *matrix, GENmodel *inModel, CKTcircuit *ckt,
                 here->VDIOconductance = here->VDMOSm / 10e-03;
             }
 
-            if (model->VDMOSdrainResistance != 0) {
+            if (model->VDMOSdrainResistance > 0) {
                 if (here->VDMOSdNodePrime == 0) {
                     error = CKTmkVolt(ckt, &tmp, here->VDMOSname, "drain");
                     if (error) return(error);
@@ -266,7 +304,7 @@ VDMOSsetup(SMPmatrix *matrix, GENmodel *inModel, CKTcircuit *ckt,
                 here->VDMOSdNodePrime = here->VDMOSdNode;
             }
 
-            if (model->VDMOSgateResistance != 0 ) {
+            if (model->VDMOSgateResistance > 0 ) {
                 if (here->VDMOSgNodePrime == 0) {
                     error = CKTmkVolt(ckt, &tmp, here->VDMOSname, "gate");
                     if (error) return(error);
@@ -289,7 +327,7 @@ VDMOSsetup(SMPmatrix *matrix, GENmodel *inModel, CKTcircuit *ckt,
                 here->VDMOSgNodePrime = here->VDMOSgNode;
             }
 
-            if (model->VDMOSsourceResistance != 0) {
+            if (model->VDMOSsourceResistance > 0) {
                 if (here->VDMOSsNodePrime == 0) {
                     error = CKTmkVolt(ckt, &tmp, here->VDMOSname, "source");
                     if (error) return(error);
@@ -336,7 +374,7 @@ VDMOSsetup(SMPmatrix *matrix, GENmodel *inModel, CKTcircuit *ckt,
                 here->VDIOposPrimeNode = here->VDMOSsNode;
             }
 
-            if ((here->VDMOSthermalGiven) && (model->VDMOSrthjcGiven)) {
+            if ((here->VDMOSthermal) && (model->VDMOSrthjcGiven)) {
                if (here->VDMOStempNode == -1) {
                   error = CKTmkVolt(ckt,&tmp,here->VDMOSname,"Tj");
                   if (error) return(error);
@@ -368,58 +406,61 @@ do { if((here->ptr = SMPmakeElt(matrix, here->first, here->second)) == NULL){\
     return(E_NOMEM);\
 } } while(0)
 
-            if ((here->VDMOSthermalGiven) && (model->VDMOSrthjcGiven)) {
-                TSTALLOC(VDMOSTemptempPtr, VDMOStempNode, VDMOStempNode);  /* Transistor thermal contribution */
-                TSTALLOC(VDMOSTempdpPtr, VDMOStempNode, VDMOSdNodePrime);
-                TSTALLOC(VDMOSTempspPtr, VDMOStempNode, VDMOSsNodePrime);
-                TSTALLOC(VDMOSTempgpPtr, VDMOStempNode, VDMOSgNodePrime);
-                TSTALLOC(VDMOSGPtempPtr, VDMOSgNodePrime, VDMOStempNode);
-                TSTALLOC(VDMOSDPtempPtr, VDMOSdNodePrime, VDMOStempNode);
-                TSTALLOC(VDMOSSPtempPtr, VDMOSsNodePrime, VDMOStempNode);
-
-                TSTALLOC(VDIOTempposPrimePtr, VDMOStempNode, VDIOposPrimeNode);/* Diode thermal contribution */
-                TSTALLOC(VDIOTempnegPtr, VDMOStempNode, VDMOSdNode);
-                TSTALLOC(VDIOPosPrimetempPtr, VDIOposPrimeNode, VDMOStempNode);
-                TSTALLOC(VDIONegtempPtr, VDMOSdNode, VDMOStempNode);
-
-                TSTALLOC(VDMOSTcasetcasePtr, VDMOStcaseNode, VDMOStcaseNode);   /* Rthjc between tj and tcase*/
-                TSTALLOC(VDMOSTcasetempPtr, VDMOStcaseNode, VDMOStempNode);
-                TSTALLOC(VDMOSTemptcasePtr, VDMOStempNode, VDMOStcaseNode);
-                TSTALLOC(VDMOSTptpPtr, VDMOStNodePrime, VDMOStNodePrime);       /* Rthca between tcase and Vsrc */
-                TSTALLOC(VDMOSTptcasePtr, VDMOStNodePrime, VDMOStempNode);
-                TSTALLOC(VDMOSTcasetpPtr, VDMOStempNode, VDMOStNodePrime);
-                TSTALLOC(VDMOSCktTcktTPtr, VDMOSvcktTbranch, VDMOSvcktTbranch); /* Vsrc=cktTemp to gnd */
-                TSTALLOC(VDMOSCktTtpPtr, VDMOSvcktTbranch, VDMOStNodePrime);
-                TSTALLOC(VDMOSTpcktTPtr, VDMOStNodePrime, VDMOSvcktTbranch);
-            }
-            TSTALLOC(VDMOSDdPtr, VDMOSdNode, VDMOSdNode);
-            TSTALLOC(VDMOSGgPtr, VDMOSgNode, VDMOSgNode);
-            TSTALLOC(VDMOSSsPtr, VDMOSsNode, VDMOSsNode);
+            TSTALLOC(VDMOSDdPtr,   VDMOSdNode,      VDMOSdNode);
+            TSTALLOC(VDMOSGgPtr,   VDMOSgNode,      VDMOSgNode);
+            TSTALLOC(VDMOSSsPtr,   VDMOSsNode,      VDMOSsNode);
             TSTALLOC(VDMOSDPdpPtr, VDMOSdNodePrime, VDMOSdNodePrime);
             TSTALLOC(VDMOSSPspPtr, VDMOSsNodePrime, VDMOSsNodePrime);
             TSTALLOC(VDMOSGPgpPtr, VDMOSgNodePrime, VDMOSgNodePrime);
-            TSTALLOC(VDMOSDdpPtr, VDMOSdNode, VDMOSdNodePrime);
+            TSTALLOC(VDMOSDdpPtr,  VDMOSdNode,      VDMOSdNodePrime);
             TSTALLOC(VDMOSGPdpPtr, VDMOSgNodePrime, VDMOSdNodePrime);
             TSTALLOC(VDMOSGPspPtr, VDMOSgNodePrime, VDMOSsNodePrime);
-            TSTALLOC(VDMOSSspPtr, VDMOSsNode, VDMOSsNodePrime);
+            TSTALLOC(VDMOSSspPtr,  VDMOSsNode,      VDMOSsNodePrime);
             TSTALLOC(VDMOSDPspPtr, VDMOSdNodePrime, VDMOSsNodePrime);
-            TSTALLOC(VDMOSDPdPtr, VDMOSdNodePrime, VDMOSdNode);
+            TSTALLOC(VDMOSDPdPtr,  VDMOSdNodePrime, VDMOSdNode);
             TSTALLOC(VDMOSDPgpPtr, VDMOSdNodePrime, VDMOSgNodePrime);
             TSTALLOC(VDMOSSPgpPtr, VDMOSsNodePrime, VDMOSgNodePrime);
-            TSTALLOC(VDMOSSPsPtr, VDMOSsNodePrime, VDMOSsNode);
+            TSTALLOC(VDMOSSPsPtr,  VDMOSsNodePrime, VDMOSsNode);
             TSTALLOC(VDMOSSPdpPtr, VDMOSsNodePrime, VDMOSdNodePrime);
 
-            TSTALLOC(VDMOSGgpPtr, VDMOSgNode, VDMOSgNodePrime);
+            TSTALLOC(VDMOSGgpPtr, VDMOSgNode,      VDMOSgNodePrime);
             TSTALLOC(VDMOSGPgPtr, VDMOSgNodePrime, VDMOSgNode);
 
             TSTALLOC(VDMOSDsPtr, VDMOSdNode, VDMOSsNode);
             TSTALLOC(VDMOSSdPtr, VDMOSsNode, VDMOSdNode);
 
-            TSTALLOC(VDIORPdPtr, VDIOposPrimeNode, VDMOSdNode);
-            TSTALLOC(VDIODrpPtr, VDMOSdNode, VDIOposPrimeNode);
-            TSTALLOC(VDIOSrpPtr, VDMOSsNode, VDIOposPrimeNode);
-            TSTALLOC(VDIORPsPtr, VDIOposPrimeNode, VDMOSsNode);
+            TSTALLOC(VDIORPdPtr,  VDIOposPrimeNode, VDMOSdNode);
+            TSTALLOC(VDIODrpPtr,  VDMOSdNode,       VDIOposPrimeNode);
+            TSTALLOC(VDIOSrpPtr,  VDMOSsNode,       VDIOposPrimeNode);
+            TSTALLOC(VDIORPsPtr,  VDIOposPrimeNode, VDMOSsNode);
             TSTALLOC(VDIORPrpPtr, VDIOposPrimeNode, VDIOposPrimeNode);
+
+            if ((here->VDMOSthermal) && (model->VDMOSrthjcGiven)) {
+                TSTALLOC(VDMOSTemptempPtr, VDMOStempNode,   VDMOStempNode);  /* Transistor thermal contribution */
+                TSTALLOC(VDMOSTempdpPtr,   VDMOStempNode,   VDMOSdNodePrime);
+                TSTALLOC(VDMOSTempspPtr,   VDMOStempNode,   VDMOSsNodePrime);
+                TSTALLOC(VDMOSTempgpPtr,   VDMOStempNode,   VDMOSgNodePrime);
+                TSTALLOC(VDMOSGPtempPtr,   VDMOSgNodePrime, VDMOStempNode);
+                TSTALLOC(VDMOSDPtempPtr,   VDMOSdNodePrime, VDMOStempNode);
+                TSTALLOC(VDMOSSPtempPtr,   VDMOSsNodePrime, VDMOStempNode);
+
+                TSTALLOC(VDIOTempposPrimePtr, VDMOStempNode,    VDIOposPrimeNode);/* Diode thermal contribution */
+                TSTALLOC(VDMOSTempdPtr,       VDMOStempNode,    VDMOSdNode);
+                TSTALLOC(VDIOPosPrimetempPtr, VDIOposPrimeNode, VDMOStempNode);
+                TSTALLOC(VDMOSDtempPtr,       VDMOSdNode,       VDMOStempNode);
+                TSTALLOC(VDMOStempSPtr,       VDMOStempNode,    VDMOSsNode);
+                TSTALLOC(VDMOSSTempPtr,       VDMOSsNode,       VDMOStempNode);
+
+                TSTALLOC(VDMOSTcasetcasePtr, VDMOStcaseNode,   VDMOStcaseNode);   /* Rthjc between tj and tcase*/
+                TSTALLOC(VDMOSTcasetempPtr,  VDMOStcaseNode,   VDMOStempNode);
+                TSTALLOC(VDMOSTemptcasePtr,  VDMOStempNode,    VDMOStcaseNode);
+                TSTALLOC(VDMOSTptpPtr,       VDMOStNodePrime,  VDMOStNodePrime);  /* Rthca between tcase and Vsrc */
+                TSTALLOC(VDMOSTptcasePtr,    VDMOStNodePrime,  VDMOStempNode);
+                TSTALLOC(VDMOSTcasetpPtr,    VDMOStempNode,    VDMOStNodePrime);
+                TSTALLOC(VDMOSCktTcktTPtr,   VDMOSvcktTbranch, VDMOSvcktTbranch); /* Vsrc=cktTemp to gnd */
+                TSTALLOC(VDMOSCktTtpPtr,     VDMOSvcktTbranch, VDMOStNodePrime);
+                TSTALLOC(VDMOSTpcktTPtr,     VDMOStNodePrime,  VDMOSvcktTbranch);
+            }
         }
     }
     return(OK);
@@ -457,7 +498,7 @@ VDMOSunsetup(GENmodel *inModel, CKTcircuit *ckt)
                 CKTdltNNum(ckt, here->VDIOposPrimeNode);
             here->VDIOposPrimeNode = 0;
 
-            if ((here->VDMOSthermalGiven) && (model->VDMOSrthjcGiven)) {
+            if ((here->VDMOSthermal) && (model->VDMOSrthjcGiven)) {
                 if (here->VDMOStNodePrime > 0)
                     CKTdltNNum(ckt, here->VDMOStNodePrime);
                 here->VDMOStNodePrime = 0;

@@ -3,8 +3,13 @@
 
 FILE table2D/cfunc.mod
 
-Copyright 2015
-Holger Vogt
+-------------------------------------------------------------------------
+ Copyright 2015
+ The ngspice team
+ All Rights Reserved
+ GPL
+ (see COPYING or https://opensource.org/licenses/GPL-2.0)
+-------------------------------------------------------------------------
 
   This program is free software; you can redistribute it and/or modify
   it under the terms of the GNU General Public License as published by
@@ -508,7 +513,7 @@ static Table2_Data_t *init_local_data(const char *filename, int order)
             /* generate  column data structure (y) */
             if ((loc->ycol = (double *) calloc((size_t) iy,
                     sizeof(double))) == (double *) NULL) {
-                cm_message_printf("Unable to allocate colum structure.");
+                cm_message_printf("Unable to allocate column structure.");
                 xrc = -1;
                 goto EXITPOINT;
             }

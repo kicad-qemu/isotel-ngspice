@@ -1,11 +1,13 @@
-//////////////////////////////////////////////////////////////////////////////
-// Build cmextrn.h, cminfo.h, udnextrn.h and udninfo.h from udnpath.lst and
-// modpath.lst using 'cmpp -lst'. Then compile this file and link it with
-// cm and udn object files to produce a dll that can be loaded by the
-// spice opus simulator at run-time.
-//
-// Author: Arpad Buermen
-////////////////////////////////////////////////////////////////////////////// 
+/* ----------------------------------------------------------------------
+ Build cmextrn.h, cminfo.h, udnextrn.h and udninfo.h from udnpath.lst and
+ modpath.lst using 'cmpp -lst'. Then compile this file and link it with
+ cm and udn object files to produce a dll that can be loaded by ngspice
+ at run-time.
+ Copyright 2000 The ngspice team
+ 3 - Clause BSD license
+ (see COPYING or https://opensource.org/licenses/BSD-3-Clause)
+ Author: Arpad Buermen
+------------------------------------------------------------------------ */
 
 #include  <stdarg.h>
 #include  <stdlib.h>
@@ -67,10 +69,6 @@ extern CM_EXPORT void *CMdevNum(void);
 extern CM_EXPORT void *CMudns(void);
 extern CM_EXPORT void *CMudnNum(void);
 extern CM_EXPORT void *CMgetCoreItfPtr(void);
-
-extern void *tmalloc(size_t num);
-extern void *trealloc(const void *str, size_t num);
-extern void txfree(const void *ptr);
 
 
 // This one returns the device table

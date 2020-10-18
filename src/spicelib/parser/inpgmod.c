@@ -1,5 +1,8 @@
 /**********
 Copyright 1990 Regents of the University of California.  All rights reserved.
+Copyright 2000 The ngspice team
+3-Clause BSD license
+(see COPYING or https://opensource.org/licenses/BSD-3-Clause)
 Author: 1985 Thomas L. Quarles, 1991 David A. Gates
 Modified: 2001 Paolo Nenzi (Cider Integration)
 **********/
@@ -9,6 +12,7 @@ Modified: 2001 Paolo Nenzi (Cider Integration)
 #include "ngspice/ifsim.h"
 #include "ngspice/cpstd.h"
 #include "ngspice/fteext.h"
+#include "ngspice/compatmode.h"
 #include "inpxx.h"
 #include <errno.h>
 
@@ -121,8 +125,9 @@ create_model(CKTcircuit *ckt, INPmodel *modtmp, INPtables *tab)
             error = ft_sim->setModelParm(ckt, modtmp->INPmodfast, p->id, val, NULL);
             if (error)
                 return error;
-        } else if (strcmp(parm, "level") == 0) {
-            /* just grab the level number and throw away */
+        } else if ((strcmp(parm, "level") == 0) || (strcmp(parm, "m") == 0)) {
+            /* no instance parameter default for level and multiplier */
+            /* just grab the number and throw away */
             /* since we already have that info from pass1 */
             INPgetValue(ckt, &line, IF_REAL, tab);
         } else {
@@ -139,20 +144,20 @@ create_model(CKTcircuit *ckt, INPmodel *modtmp, INPtables *tab)
                                     modtmp->INPmodfast->defaults));
             } else {
 
-            double dval;
+                double dval;
 
-            /* want only the parameter names in output - not the values */
-            errno = 0;    /* To distinguish success/failure after call */
-            dval = strtod(parm, &endptr);
-            /* Check for various possible errors */
-            if ((errno == ERANGE && dval == HUGE_VAL) || errno != 0) {
-                perror("strtod");
-                controlled_exit(EXIT_FAILURE);
-            }
-            if (endptr == parm) /* it was no number - it is really a string */
-                err = INPerrCat(err,
-                                tprintf("unrecognized parameter (%s) - ignored",
-                                        parm));
+                /* want only the parameter names in output - not the values */
+                errno = 0;    /* To distinguish success/failure after call */
+                dval = strtod(parm, &endptr);
+                /* Check for various possible errors */
+                if ((errno == ERANGE && dval == HUGE_VAL) || errno != 0) {
+                    perror("strtod");
+                    controlled_exit(EXIT_FAILURE);
+                }
+                if (endptr == parm) /* it was no number - it is really a string */
+                    err = INPerrCat(err,
+                                    tprintf("unrecognized parameter (%s) - ignored",
+                                            parm));
             }
         }
         FREE(parm);
@@ -222,20 +227,49 @@ INPgetModBin(CKTcircuit *ckt, char *name, INPmodel **model, INPtables *tab, char
     double       l, w, lmin, lmax, wmin, wmax;
     double       parse_values[4];
     bool         parse_found[4];
-    static char *instance_tokens[] = { "l", "w" };
+    static char *instance_tokens[] = { "l", "w", "nf", "wnflag" };
     static char *model_tokens[]    = { "lmin", "lmax", "wmin", "wmax" };
     double       scale;
+    int          wnflag;
 
     if (!cp_getvar("scale", CP_REAL, &scale, 0))
         scale = 1;
 
+    if (!cp_getvar("wnflag", CP_NUM, &wnflag, 0)) {
+        if (newcompat.spe || newcompat.hs)
+            wnflag = 1;
+        else
+            wnflag = 0;
+    }
+
     *model = NULL;
 
+    /* read W and L. If not on the instance line, leave */
     if (!parse_line(line, instance_tokens, 2, parse_values, parse_found))
         return NULL;
 
+    /* This is for reading nf. If nf is not available, set to 1 if in HSPICE or Spectre compatibility mode */
+    if (!parse_line(line, instance_tokens, 3, parse_values, parse_found)) {
+        parse_values[2] = 1.; /* divisor */
+    }
+    /* This is for reading wnflag from instance. If it is not available, no change.
+       If instance wnflag == 0, set divisor to 1, else use instance nf */
+    else if (parse_line(line, instance_tokens, 4, parse_values, parse_found)) {
+        /* wnflag from instance overrules: no use of nf */
+        if (parse_values[3] == 0) {
+            parse_values[2] = 1.; /* divisor */
+        }
+    }
+    /* We do have nf, but no wnflag on the instance. Now it depends on the default
+       wnflag or on the .options wnflag */
+    else {
+        if (wnflag == 0)
+            parse_values[2] = 1.; /* divisor */
+    }
+
+
     l = parse_values[0] * scale;
-    w = parse_values[1] * scale;
+    w = parse_values[1] / parse_values[2] * scale;
 
     for (modtmp = modtab; modtmp; modtmp = modtmp->INPnextModel) {
 

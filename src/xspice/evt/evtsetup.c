@@ -3,11 +3,10 @@ FILE    EVTsetup.c
 
 MEMBER OF process XSPICE
 
-Copyright 1991
+Public Domain
+
 Georgia Tech Research Corporation
 Atlanta, Georgia 30332
-All Rights Reserved
-
 PROJECT A-8503
 
 AUTHORS
@@ -62,6 +61,7 @@ static int EVTsetup_jobs(CKTcircuit *ckt);
 static int EVTsetup_load_ptrs(CKTcircuit *ckt);
 
 int EVTsetup_plot(CKTcircuit* ckt, char* plottypename);
+int EVTswitch_plot(CKTcircuit* ckt, const char* plottypename);
 
 
 /* Allocation macros with built-in check for out-of-memory */

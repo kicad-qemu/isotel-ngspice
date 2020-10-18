@@ -58,10 +58,10 @@ C8 OUT1 N011 3p
 .control
 op
 print v(out) @r1[i] @r2[i]
-ac dec 100 10 1Meg
+ac dec 100 1 10Meg
 plot db(V(out)/V(out1))
 set units=degrees
-plot ph(V(out)/V(out1))
+plot unwrap(ph(V(out)/V(out1)))
 tran 1u 1000m
 fourier 1K V(out)
 plot v(out)*@rload[i]

@@ -12,7 +12,7 @@
 # ---------------
 
 # Initialisation of configure
-AC_INIT([ngspice], [32], [http://ngspice.sourceforge.net/bugrep.html])
+AC_INIT([ngspice], [33], [http://ngspice.sourceforge.net/bugrep.html])
 
 # Unique file in the source directory
 AC_CONFIG_SRCDIR([src/ngspice.c])
@@ -184,6 +184,10 @@ AC_ARG_ENABLE([ndev],
 # --enable-cluster: define CLUSTER in the code. This is for cluster support
 AC_ARG_ENABLE([cluster],
     [AS_HELP_STRING([--enable-cluster], [Enable cluster support, (experimental)])])
+
+# --enable-cmathtests: run the ancient tests in src/math/cmaths
+AC_ARG_ENABLE([cmathtests],
+    [AS_HELP_STRING([--enable-cmathtests], [Enable ancient tests in src/math/cmaths])])
 
 # --enable-help: try to force --ansi option to the compiler
 AC_ARG_ENABLE([help],
@@ -605,6 +609,22 @@ case $host_os in
 esac
 AM_CONDITIONAL([WINCONSOLE], [test "x$has_winconsole" = xyes])
 
+if test "x$has_winconsole" = xyes; then
+    AC_CHECK_PROGS([WINRES], [windres windres.exe], [no])
+    if test "x$WINRES" = xno; then
+        AC_MSG_WARN([If you want adding the icon you should install windres])
+    fi
+fi
+
+if test "x$with_wingui" = xyes; then
+    AC_CHECK_PROGS([WINRES], [windres windres.exe], [no])
+    if test "x$WINRES" = xno; then
+        AC_MSG_WARN([If you want adding the icon you should install windres])
+    fi
+fi
+
+AM_CONDITIONAL([WINRESOURCE], [test "x$WINRES" = xwindres])
+
 case $with_wingui in
     yes )
         AC_DEFINE([X_DISPLAY_MISSING])
@@ -986,6 +1006,8 @@ AX_PROG_BISON_VERSION([2.7], [],
     [AC_DEFINE([OLD_BISON], [], [Bison is older than 2.7]),
      AC_MSG_WARN([Bison is older than 2.7])])
 AC_PROG_LEX
+
+AM_CONDITIONAL([CMATHTESTS], [test "x$enable_cmathtests" = xyes])
 
 #################  XSPICE ##################################################
 # Add new code models to the build by pointing to them here.

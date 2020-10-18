@@ -273,9 +273,15 @@ ft_cktcoms(bool terse)
 
     /* Now all the '.' lines */
     while (coms) {
-        command = cp_lexer(coms->wl_word);
-        if (!command || command->wl_word == (char *) NULL) {
+        wordlist* freecom;
+        freecom = command = cp_lexer(coms->wl_word);
+        if (!command) {
             /* Line not converted to a wordlist */
+            goto bad;
+        }
+        if (command->wl_word == (char*)NULL) {
+            /* Line not converted to a wordlist */
+            wl_free(freecom);
             goto bad;
         }
         if (eq(command->wl_word, ".width")) {
@@ -287,6 +293,7 @@ ft_cktcoms(bool terse)
                 if (!s || !s[1]) {
                     fprintf(cp_err, "Error: bad line %s\n", coms->wl_word);
                     coms = coms->wl_next;
+                    wl_free(freecom);
                     continue;
                 }
                 i = atoi(++s);
@@ -301,6 +308,7 @@ ft_cktcoms(bool terse)
                 if (!command) {
                     fprintf(cp_err, "Error: bad line %s\n", coms->wl_word);
                     coms = coms->wl_next;
+                    wl_free(freecom);
                     continue;
                 }
                 plottype = command->wl_word;
@@ -329,6 +337,7 @@ ft_cktcoms(bool terse)
                     fprintf(cp_err, "Error: bad line %s\n",
                             coms->wl_word);
                     coms = coms->wl_next;
+                    wl_free(freecom);
                     continue;
                 }
                 plottype = command->wl_word;
@@ -363,12 +372,13 @@ ft_cktcoms(bool terse)
             }
         } else if (!eq(command->wl_word, ".save") &&
                    !eq(command->wl_word, ".op") &&
-                   // !eq(command->wl_word, ".measure") &&
                    !ciprefix(".meas", command->wl_word) &&
                    !eq(command->wl_word, ".tf")) {
+            wl_free(freecom);
             goto bad;
         }
         coms = coms->wl_next; /* go to next line */
+        wl_free(freecom);
     } /* end of loop over '.' lines */
 
 nocmds:

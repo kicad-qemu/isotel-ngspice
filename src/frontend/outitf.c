@@ -65,7 +65,7 @@ static int InterpPlotAdd(runDesc *plotPtr, IFvalue *refValue, IFvalue *valuePtr)
 #include "ngspice/tclspice.h"
 #elif defined SHARED_MODULE
 extern int sh_ExecutePerLoop(void);
-extern void sh_vecinit(runDesc *run);
+extern int sh_vecinit(runDesc *run);
 #endif
 
 /*Suppressing progress info in -o option */
@@ -845,8 +845,10 @@ OUTattributes(runDesc *plotPtr, IFuid varName, int param, IFvalue *value)
 }
 
 
-/* The file writing routines. */
-
+/* The file writing routines.
+   Write a raw file in batch mode (-b and -r flags).
+   Writing a raw file in interactive or control  mode is handled
+   by raw_write() in rawfile.c */
 static void
 fileInit(runDesc *run)
 {
