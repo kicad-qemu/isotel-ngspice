@@ -623,10 +623,10 @@ struct card *inp_readall(FILE *fp, const char *dir_name,
         struct card *working = cc->nextcard;
 
         delete_libs();
-		
+
 #ifndef EXT_ASC
         utf8_syntax_check(working);
-#endif		
+#endif
 
         /* some syntax checks, including title line */
         inp_check_syntax(cc);
@@ -1118,15 +1118,16 @@ struct inp_read_t inp_read( FILE *fp, int call_depth, const char *dir_name,
                     !ciprefix("echo", buffer) && !ciprefix("shell", buffer) &&
                     !ciprefix("source", buffer) &&
                     !ciprefix("load", buffer) && !ciprefix("setcs", buffer)) {
-                /* lower case for all other lines */
-                for (s = buffer; *s && (*s != '\n'); s++)
-                    *s = tolower_c(*s);
+                /* and special case is also sourcepath, which needs to preserve folder case */
+                if (!(ciprefix("set", buffer) && strstr(buffer, "sourcepath"))) {
+                    /* lower case for all other lines */
+                    for (s = buffer; *s && (*s != '\n'); s++) *s = tolower_c(*s);
+                }
+                else s = buffer;
             }
             else {
-                /* s points to end of buffer for all cases not treated so far
-                 */
-                for (s = buffer; *s && (*s != '\n'); s++)
-                    ;
+                /* s points to end of buffer for all cases not treated so far */
+                for (s = buffer; *s && (*s != '\n'); s++);
             }
 
             /* add Inp_Path to buffer while keeping the sourcepath variable contents */
@@ -1335,7 +1336,7 @@ static char *inp_pathresolve(const char *name)
     /* just try it */
     if (stat(name, &st) == 0)
         return copy(name);
-	
+
 #if !defined(EXT_ASC) && (defined(__MINGW32__) || defined(_MSC_VER))
     wchar_t wname[BSIZE_SP];
     if (MultiByteToWideChar(CP_UTF8, 0, name, -1, wname, 2 * (int)strlen(name) + 1) == 0) {
@@ -1345,7 +1346,7 @@ static char *inp_pathresolve(const char *name)
     }
     if (_waccess(wname, 0) == 0)
         return copy(name);
-#endif	
+#endif
 
     /* fail if this was an absolute filename or if there is no sourcepath var
      */
