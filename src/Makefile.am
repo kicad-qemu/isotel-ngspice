@@ -1,7 +1,7 @@
 ## Process this file with automake to produce Makefile.in
 
-SUBDIRS = include/ngspice misc maths frontend spicelib
-DIST_SUBDIRS = include/ngspice misc maths frontend spicelib xspice ciderlib unsupported
+SUBDIRS = include/ngspice include/cppduals/duals misc maths frontend spicelib
+DIST_SUBDIRS = include/ngspice include/cppduals/duals misc maths frontend spicelib xspice ciderlib
 
 if XSPICE_WANTED
 SUBDIRS += xspice
@@ -9,10 +9,6 @@ endif
 
 if CIDER_WANTED
 SUBDIRS += ciderlib
-endif
-
-if SENSE2_WANTED
-SUBDIRS += unsupported
 endif
 
 if !TCL_MODULE
@@ -73,6 +69,7 @@ DYNAMIC_DEVICELIBS =					\
 	spicelib/devices/isrc/libisrc.la		\
 	spicelib/devices/hfet1/libhfet.la		\
 	spicelib/devices/hfet2/libhfet2.la		\
+	spicelib/devices/hicum2/libhicum2.la		\
 	spicelib/devices/hisim2/libhisim2.la		\
 	spicelib/devices/hisimhv1/libhisimhv1.la	\
 	spicelib/devices/hisimhv2/libhisimhv2.la	\
@@ -152,10 +149,6 @@ endif
 ngspice_LDADD += \
 	spicelib/analysis/libckt.la \
 	spicelib/devices/libdev.la
-
-if SENSE2_WANTED
-ngspice_LDADD += unsupported/libunsupported.la
-endif
 
 if XSPICE_WANTED
 ngspice_LDADD += \
@@ -269,14 +262,19 @@ endif !NO_HELP
 ## sconvert:
 
 ngsconvert_SOURCES =  ngsconvert.c
-
-ngsconvert_LDADD =  \
-	frontend/com_history.lo \
-	frontend/libfte.la \
-	frontend/parser/libparser.la \
-	maths/misc/libmathmisc.la \
-	misc/libmisc.la
-
+ngsconvert_LDADD = \
+	frontend/dvec.lo \
+    frontend/rawfile.lo \
+    frontend/typesdef.lo \
+    frontend/variable.lo \
+    frontend/dimens.lo \
+    frontend/quote.lo \
+    frontend/parser/lexical.lo \
+    frontend/parser/numparse.lo \
+    misc/string.lo \
+    misc/wlist.lo \
+    misc/misc_time.lo \
+    misc/alloc.lo
 
 ## proc2mod:
 
@@ -500,7 +498,6 @@ if SHARED_MODULE
 lib_LTLIBRARIES = libngspice.la
 
 libngspice_la_SOURCES = \
-	main.c \
 	conf.c \
 	conf.h \
 	ngspice.c \
@@ -581,6 +578,7 @@ libngspice_la_LIBADD += \
 libngspice_la_CFLAGS = -shared
 
 libngspice_la_LDFLAGS =  -shared
+libngspice_la_LDFLAGS +=  -lstdc++
 
 if SHWIN
 libngspice_la_LDFLAGS += -Wl,--output-def=ngspice.def  -Wl,--out-implib=ngspice.dll.a

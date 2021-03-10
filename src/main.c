@@ -165,6 +165,7 @@ struct variable *(*if_getparam)(CKTcircuit *ckt, char **name, char *param, int i
 
 /* static functions */
 int SIMinit(IFfrontEnd *frontEnd, IFsimulator **simulator);
+
 static ATTRIBUTE_NORETURN void sp_shutdown(int exitval);
 static void app_rl_readlines(void);
 
@@ -177,7 +178,6 @@ static int app_event_func(void);
 #endif
 
 static void show_help(void);
-static void show_version(void);
 static bool read_initialisation_file(const char *dir, const char *name);
 
 #ifdef SIMULATOR
@@ -512,7 +512,6 @@ SIMinit(IFfrontEnd *frontEnd, IFsimulator **simulator)
 } /* end of function SIMinit */
 
 
-
 /* -------------------------------------------------------------------------- */
 /* Shutdown gracefully. */
 static ATTRIBUTE_NORETURN void
@@ -673,7 +672,6 @@ app_rl_readlines(void)
 } /* end of function app_rl_readlines */
 
 
-
 /* -------------------------------------------------------------------------- */
 static void
 show_help(void)
@@ -698,19 +696,6 @@ show_help(void)
            "  -v, --version             output version information and exit\n"
            "\n"
            "Report bugs to %s.\n", cp_program, Bug_Addr);
-}
-
-/* -------------------------------------------------------------------------- */
-static void
-show_version(void)
-{
-    printf("%s compiled from %s revision %s\n"
-           "Written originally by Berkeley University\n"
-           "Currently maintained by the NGSpice Project\n\n"
-           "Copyright (C) 1985-1996,"
-           "  The Regents of the University of California\n"
-           "Copyright (C) 1999-2011,"
-           "  The NGSpice Project\n", cp_program, PACKAGE, VERSION);
 }
 
 #ifdef SIMULATOR
@@ -782,8 +767,6 @@ static bool read_initialisation_file(const char *dir, const char *name)
     return result;
 } /* end of function read_initialisation_file */
 
-
-
 /* -------------------------------------------------------------------------- */
 static void print_news(void)
 {
@@ -801,12 +784,10 @@ static void print_news(void)
     }
 } /* end of function print_news */
 
-
 #ifdef HAS_WINGUI
 #define main xmain
 #endif
 
-#ifndef SHARED_MODULE
 int main(int argc, char **argv)
 {
     char log_file[BSIZE_SP];
@@ -946,7 +927,7 @@ int main(int argc, char **argv)
             break;
 
         case 'v':       /* Version info */
-            show_version();
+            com_version(NULL);
             sp_shutdown(EXIT_INFO);
             break;
 
@@ -1444,6 +1425,3 @@ int main(int argc, char **argv)
         }
     }
 } /* end of function main */
-
-#endif
-

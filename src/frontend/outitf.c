@@ -82,7 +82,7 @@ int fixme_inoise_type = SV_NOTYPE;
 #define DOUBLE_PRECISION    15
 
 
-static clock_t lastclock, currclock;
+static clock_t lastclock, currclock, startclock;
 static double *rowbuf;
 static size_t column, rowbuflen;
 
@@ -255,6 +255,13 @@ beginPlot(JOB *analysisPtr, CKTcircuit *circuitPtr, char *cktName, char *analNam
                             saves[i].used = 1;
                             break;
                         }
+                        /* generate a vector of real time information */
+                        else if (ft_ngdebug && eq(refName, "time") && eq(saves[i].name, "speedcheck")) {
+                            addDataDesc(run, "speedcheck", IF_REAL, j, initmem);
+                            savesused[i] = TRUE;
+                            saves[i].used = 1;
+                            break;
+                        }
         } else {
             for (i = 0; i < numNames; i++)
                 if (!refName || !name_eq(dataNames[i], refName))
@@ -268,6 +275,10 @@ beginPlot(JOB *analysisPtr, CKTcircuit *circuitPtr, char *cktName, char *analNam
                     {
                         addDataDesc(run, dataNames[i], dataType, i, initmem);
                     }
+            /* generate a vector of real time information */
+            if (ft_ngdebug && refName && eq(refName, "time")) {
+                 addDataDesc(run, "speedcheck", IF_REAL, numNames, initmem);
+            }
         }
 
         /* Pass 1 and a bit.
@@ -422,6 +433,7 @@ beginPlot(JOB *analysisPtr, CKTcircuit *circuitPtr, char *cktName, char *analNam
     sh_vecinit(run);
 #endif
 
+    startclock = clock();
     return (OK);
 }
 
@@ -532,7 +544,13 @@ OUTpD_memory(runDesc *run, IFvalue *refValue, IFvalue *valuePtr)
             else if (d->type == IF_COMPLEX)
                 plotAddComplexValue(d, refValue->cValue);
         } else if (d->regular) {
-            if (d->type == IF_REAL)
+            if (ft_ngdebug && d->type == IF_REAL && eq(d->name, "speedcheck")) {
+                /* current time */
+                clock_t cl = clock();
+                double tt = ((double)cl - (double)startclock) / CLOCKS_PER_SEC;
+                plotAddRealValue(d, tt);
+            }
+            else if (d->type == IF_REAL)
                 plotAddRealValue(d, valuePtr->v.vec.rVec[d->outIndex]);
             else if (d->type == IF_COMPLEX)
                 plotAddComplexValue(d, valuePtr->v.vec.cVec[d->outIndex]);
@@ -731,7 +749,7 @@ OUTpData(runDesc *plotPtr, IFvalue *refValue, IFvalue *valuePtr)
 
 
 
-int OUTwReference(void *plotPtr, IFvalue *valuePtr, void **refPtr)
+int OUTwReference(runDesc*plotPtr, IFvalue *valuePtr, void **refPtr)
 {
     NG_IGNORE(refPtr);
     NG_IGNORE(valuePtr);
@@ -905,6 +923,8 @@ guess_type(const char *name)
         type = SV_CURRENT;
     else if (cieq(name, "time"))
         type = SV_TIME;
+    else if ( cieq(name, "speedcheck"))
+        type = SV_TIME;
     else if (cieq(name, "frequency"))
         type = SV_FREQUENCY;
     else if (ciprefix("inoise", name))
@@ -915,6 +935,8 @@ guess_type(const char *name)
         type = SV_TEMP;
     else if (cieq(name, "res-sweep"))
         type = SV_RES;
+    else if (cieq(name, "i-sweep"))
+        type = SV_CURRENT;
     else if ((*name == '@') && substring("[g", name)) /* token starting with [g */
         type = SV_ADMITTANCE;
     else if ((*name == '@') && substring("[c", name))

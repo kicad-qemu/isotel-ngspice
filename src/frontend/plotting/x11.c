@@ -72,8 +72,8 @@ typedef struct x11info {
     int lastx, lasty;   /* used in X_DrawLine */
     int lastlinestyle;  /* used in X_DrawLine */
     Pixel colors[NUMCOLORS];
-    char txtcolor[16];
-    char bgcolor[16];
+    char txtcolor[32];
+    char bgcolor[32];
     char fname[BSIZE_SP];
     int fsize;
     /* use with xft */
@@ -110,7 +110,7 @@ static GRAPH *lasthardcopy; /* graph user selected */
 static int X11_Open = 0;
 static int numdispplanes;
 static int xfont_size;
-static char fontname[513];
+static char fontname[BSIZE_SP];
 
 /* static functions */
 static void initlinestyles(void);
@@ -132,6 +132,8 @@ static void resize(Widget w, XtPointer client_data, XEvent *ev, Boolean *continu
 //XtCallbackProc
 static void hardcopy(Widget w, XtPointer client_data, XtPointer call_data);
 static void killwin(Widget w, XtPointer client_data, XtPointer call_data);
+
+int X11_GetLenStr(GRAPH* gr, char* instring);
 
 
 static int
@@ -242,7 +244,7 @@ initcolors(GRAPH *graph)
     /* Silence incorrect compiler warning about possibly not being init */
     XColor bgcolor = {0};
 
-    char buf[BSIZE_SP], colorstring[BSIZE_SP];
+    char buf[BSIZE_SP], colorstring[32];
     int xmaxcolors = NUMCOLORS; /* note: can we get rid of this? */
 
     if (numdispplanes == 1) {
@@ -308,7 +310,7 @@ initcolors(GRAPH *graph)
             }
             if (i == 0) {
                 bgcolor = visualcolor;
-                strncpy(DEVDEP(graph).bgcolor, colorstring, 15);
+                strncpy(DEVDEP(graph).bgcolor, colorstring, 32);
             }
             if ((!gridgiven) && (i == 1)) {
                 /* select grid color according to background color.
@@ -318,17 +320,17 @@ initcolors(GRAPH *graph)
                         (int) (1.5 * bgcolor.green) + (int) bgcolor.blue;
                 if (tcolor > 92160) {
                     graph->colorarray[1] = BlackPixel(display, DefaultScreen(display));
-                    strncpy(DEVDEP(graph).txtcolor, "black", 15);
+                    strncpy(DEVDEP(graph).txtcolor, "black", 32);
                 }
                 else {
                     graph->colorarray[1] = WhitePixel(display, DefaultScreen(display));
-                    strncpy(DEVDEP(graph).txtcolor, "white", 15);
+                    strncpy(DEVDEP(graph).txtcolor, "white", 32);
                 }
             }
             else {
                 graph->colorarray[i] = visualcolor.pixel;
                 if (i == 1)
-                    strncpy(DEVDEP(graph).txtcolor, colorstring, 15);
+                    strncpy(DEVDEP(graph).txtcolor, colorstring, 32);
             }
         }
     }
@@ -518,7 +520,7 @@ X11_NewViewport(GRAPH *graph)
     /* set up fonts */
     if (!cp_getvar("xfont", CP_STRING, fontname, sizeof(fontname)))
         (void) strcpy(fontname, DEF_FONT);
-    strncpy(DEVDEP(graph).fname, fontname, BSIZE_SP - 1);
+    strncpy(DEVDEP(graph).fname, fontname, BSIZE_SP);
 
 #ifndef HAVE_LIBXFT
     for (p = fontname; *p && *p <= ' '; p++)
@@ -739,16 +741,16 @@ X11_Text(const char *text, int x, int y, int angle)
     if (angle == 0) {
          XftDrawStringUtf8(
             DEVDEP(currentgraph).draw, &DEVDEP(currentgraph).color, DEVDEP(currentgraph).font0,
-                x, currentgraph->absolute.height - y, (FcChar8*)text, strlen(text));
+                x, currentgraph->absolute.height - y, (FcChar8*)text, (int)strlen(text));
     }
     else if (angle == 90) {
-        int wlen, wheight;
+        int wlen=0, wheight;
         /* calculate and add offset, if ylabel with angle 90° */
         Xget_str_length(text, &wlen, &wheight, DEVDEP(currentgraph).font90, NULL, 0);
 
         XftDrawStringUtf8(
             DEVDEP(currentgraph).draw, &DEVDEP(currentgraph).color, DEVDEP(currentgraph).font90,
-                x + (int)(1.5 * wlen), currentgraph->absolute.height - y + (int)(0.5 * wheight), (FcChar8*)text, strlen(text));
+                x + (int)(1.5 * wlen), currentgraph->absolute.height - y + (int)(0.5 * wheight), (FcChar8*)text, (int)strlen(text));
     }
     else
         fprintf(stderr, " Xft: angles other than 0 or 90 are not supported in ngspice\n");
@@ -1063,7 +1065,7 @@ zoomin(GRAPH *graph)
         SWAP(double, fy0, fy1);
     }
 
-    strncpy(buf2, graph->plotname, sizeof(buf2));
+    strncpy(buf2, graph->plotname, sizeof(buf2) - 1);
     if ((t = strchr(buf2, ':')) != NULL)
         *t = '\0';
 
@@ -1378,7 +1380,7 @@ Xget_str_length(const char *text, int* wlen, int* wheight, XftFont* gfont, char*
         XftPatternDestroy(ext_pat);
     }
     if(gfont)
-        XftTextExtentsUtf8( display, gfont, (XftChar8 *)text, strlen(text), &extents );
+        XftTextExtentsUtf8( display, gfont, (XftChar8 *)text, (int)strlen(text), &extents );
     else {
         return 1;
     }
@@ -1395,7 +1397,7 @@ Xget_str_length(const char *text, int* wlen, int* wheight, XftFont* gfont, char*
 int
 X11_GetLenStr(GRAPH *gr, char* instring)
 {
-    int wl, wh;
+    int wl=0, wh;
     Xget_str_length(instring, &wl, &wh, NULL, DEVDEP(gr).fname, DEVDEP(gr).fsize);
     return wl;
 }

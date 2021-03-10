@@ -6,7 +6,7 @@ EXTRA_DIST = .gitignore
 
 MAINTAINERCLEANFILES = Makefile.in
 
-bin_PROGRAMS = cmpp
+noinst_PROGRAMS = cmpp
 
 AM_CPPFLAGS = -I. -I$(srcdir)
 AM_YFLAGS = -d
@@ -53,7 +53,7 @@ BUILD_CMPP_FILES = main.c file_buffer.c \
 
 build/cmpp$(BUILD_EXEEXT) : $(BUILD_CMPP_FILES)
 	$(CC_FOR_BUILD) $(CFLAGS_FOR_BUILD) \
-		$(AM_CPPFLAGS) $(LDFLAGS_FOR_BUILD) -o $@ $^ -lshlwapi
+		$(AM_CPPFLAGS) $(LDFLAGS_FOR_BUILD) -o $@ $^ $(cmpp_LDADD)
 
 distclean-local:
 	-rm -rf build

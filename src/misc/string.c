@@ -73,10 +73,10 @@ int prefix_n(size_t n_char_prefix, const char *prefix,
  */
 char *dup_string(const char *str, size_t n_char)
 {
-    char *p;
+    char *p = TMALLOC(char, n_char + 1);
 
-    if ((p = TMALLOC(char, n_char + 1)) != NULL) {
-        (void) strncpy(p, str, n_char);
+    if (p != NULL) {
+        (void) memcpy(p, str, n_char + 1);
         p[n_char] = '\0';
     }
     return p;
@@ -450,6 +450,40 @@ nexttok(const char *s)
     return (char *) s;
 }
 
+/*-------------------------------------------------------------------------*
+ * nexttok skips over whitespaces and the next token in s
+ *   returns NULL if there is nothing left to skip.
+ * It replaces constructs like txfree(gettok(&actstring)) by
+ * actstring = nexttok(actstring). This is derived from the gettok_noparens version.
+ * It acts like gettok, except that it treats parens and commas like
+ * whitespace.
+ *-------------------------------------------------------------------------*/
+
+char*
+nexttok_noparens(const char* s)
+{
+    if (!s)
+        return NULL;
+    int paren = 0;
+
+    s = skip_ws(s);
+    if (!*s)
+        return NULL;
+
+    for (; *s && !isspace_c(*s); s++)
+        if (*s == '(')
+            break;
+        else if (*s == ')')
+            break;
+        else if (*s == ',')
+            break;
+
+    while (isspace_c(*s) || *s == ',' || *s == '(' || *s == ')')
+        s++;
+
+    return (char*)s;
+}
+
 
 /*-------------------------------------------------------------------------*
  * gettok skips over whitespaces or '=' and returns the next token found,
@@ -639,11 +673,10 @@ gettok_instance(char **s)
 }
 
 
-/* get the next token starting at next non white spice, stopping
-   at p, if inc_p is true, then including p, else excluding p,
-   return NULL if p is not found.
-   If '}', ']'  or ')' and nested is true, find corresponding p
-
+/* get the next token starting at next non white space, stopping
+   at p. If inc_p is true, then including p, else excluding p.
+   Return NULL if p is not found.
+   If '}', ']'  or ')' and nested is true, find corresponding p.
 */
 
 char *

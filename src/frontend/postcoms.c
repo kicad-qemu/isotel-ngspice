@@ -23,6 +23,7 @@ Author: 1985 Wayne A. Christopher, U. C. Berkeley CAD Group
 #include "parser/complete.h" /* va: throwaway */
 #include "plotting/plotting.h"
 
+#include "ngspice/compatmode.h"
 
 static void killplot(struct plot *pl);
 static void DelPlotWindows(struct plot *pl);
@@ -419,13 +420,12 @@ done:
 }
 
 
-/* Write out some data. write filename expr ... Some cleverness here is
- * required.  If the user mentions a few vectors from various plots,
- * probably he means for them to be written out seperate plots.  In any
- * case, we have to be sure to write out the scales for everything we
- * write...
+/* Write out some data into a ngspice raw file with 'write filename expr'.
+ * If vectors (expr) from various plots are selected, they are written
+ * out as seperate plots.  In any case, we have to be sure to write out
+ * the scales for everything we write. If expr is omitted, all vectors
+ * of the current plot are written.
  */
-
 void
 com_write(wordlist *wl)
 {
@@ -433,9 +433,9 @@ com_write(wordlist *wl)
     struct pnode *pn;
     struct dvec *d, *vecs = NULL, *lv = NULL, *end, *vv;
     static wordlist all = { "all", NULL, NULL };
-    struct pnode *names;
+    struct pnode *names = NULL;
     bool ascii = AsciiRawFile;
-    bool scalefound, appendwrite;
+    bool scalefound, appendwrite, plainwrite = FALSE;
     struct plot *tpl, newplot;
 
     if (wl) {
@@ -455,25 +455,49 @@ com_write(wordlist *wl)
     }
     appendwrite = cp_getvar("appendwrite", CP_BOOL, NULL, 0);
 
-    if (wl)
-        names = ft_getpnames(wl, TRUE);
-    else
-        names = ft_getpnames(&all, TRUE);
+    plainwrite = cp_getvar("plainwrite", CP_BOOL, NULL, 0);
 
-    if (names == NULL) {
-        return;
-    }
-
-    for (pn = names; pn; pn = pn->pn_next) {
-        d = ft_evaluate(pn);
-        if (!d)
-            goto done;
-        if (vecs)
-            lv->v_link2 = d;
+    /* If variable plainwrite is set, we do not expand equations, serve v vs vs etc.
+       We offer plain writing of the vectors. This enables node names containing +, -, / etc. */
+    if (!plainwrite) {
+        if (wl)
+            names = ft_getpnames(wl, TRUE);
         else
-            vecs = d;
-        for (lv = d; lv->v_link2; lv = lv->v_link2)
-            ;
+            names = ft_getpnames(&all, TRUE);
+
+        if (names == NULL) {
+            return;
+        }
+
+        for (pn = names; pn; pn = pn->pn_next) {
+            d = ft_evaluate(pn);
+            if (!d)
+                goto done;
+            if (vecs)
+                lv->v_link2 = d;
+            else
+                vecs = d;
+            for (lv = d; lv->v_link2; lv = lv->v_link2)
+                ;
+        }
+    }
+    else {
+        wordlist* wli;
+        if (!wl)
+            wl = &all;
+        for (wli = wl; wli; wli = wli->wl_next) {
+            d = vec_get(wli->wl_word);
+            if (!d) {
+                fprintf(stderr, "Error during 'write': vector %s not found\n", wli->wl_word);
+                goto done;
+            }
+            if (vecs)
+                lv->v_link2 = d;
+            else
+                vecs = d;
+            for (lv = d; lv->v_link2; lv = lv->v_link2)
+                ;
+        }
     }
 
     /* Now we have to write them out plot by plot. */

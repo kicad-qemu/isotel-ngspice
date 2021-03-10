@@ -82,6 +82,9 @@ struct card {
     struct card *nextcard;
     struct card *actualLine;
     struct nscope *level;
+    float w;
+    float l;
+    float nf;
 };
 
 /* structure used to save models in after they are read during pass 1 */
@@ -135,6 +138,7 @@ void INPpas3(
         CKTcircuit *, struct card *, INPtables *, TSKtask *, IFparm *, int);
 int INPpName(char *, IFvalue *, CKTcircuit *, int, GENinstance *);
 int INPtermInsert(CKTcircuit *, char **, INPtables *, CKTnode **);
+int INPtermSearch(CKTcircuit*, char**, INPtables*, CKTnode**);
 int INPmkTerm(CKTcircuit *, char **, INPtables *, CKTnode **);
 int INPtypelook(char *);
 int INP2dot(CKTcircuit *, INPtables *, struct card *, TSKtask *, CKTnode *);

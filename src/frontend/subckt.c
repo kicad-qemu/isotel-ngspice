@@ -60,6 +60,7 @@ Modified: 2000 AlansFixes
 #include "ngspice/ftedefs.h"
 #include "ngspice/fteinp.h"
 #include "ngspice/stringskip.h"
+#include "ngspice/compatmode.h"
 
 #include <stdarg.h>
 
@@ -75,6 +76,7 @@ Modified: 2000 AlansFixes
 #include "numparam/numpaif.h"
 
 extern void line_free_x(struct card *deck, bool recurse);
+extern int get_number_terminals(char* c);
 
 #define line_free(line, flag)                   \
     do {                                        \
@@ -557,6 +559,10 @@ doit(struct card *deck, wordlist *modnames) {
     }
 #endif
 
+    double scale;
+    if (!cp_getvar("scale", CP_REAL, &scale, 0))
+        scale = 1;
+
     error = 0;
     /* Second pass: do the replacements. */
     do {                    /*  while (!error && numpasses-- && gotone)  */
@@ -608,8 +614,115 @@ doit(struct card *deck, wordlist *modnames) {
                  * instance of a subckt that is defined above at higher level.
                  */
                 if (sss) {
-
+//                    tprint(sss->su_def);
                     struct card *su_deck = inp_deckcopy(sss->su_def);
+                    /* If we have modern PDKs, we have to reduce the amount of memory required.
+                       We try to reduce the models to the one really used.
+                       Otherwise su_deck is full of unused binning models.*/
+                    if ((newcompat.hs || newcompat.spe) && c->w > 0 && c->l > 0) {
+                        /* extract wmin, wmax, lmin, lmax */
+                        struct card* new_deck = su_deck;
+                        struct card* prev = NULL;
+                        while (su_deck) {
+                            if (!ciprefix(".model", su_deck->line)) {
+                                prev = su_deck;
+                                su_deck = su_deck->nextcard;
+                                    continue;
+                            }
+
+                            char* curr_line = su_deck->line;
+                            float fwmin, fwmax, flmin, flmax;
+                            char *wmin = strstr(curr_line, " wmin=");
+                            if (wmin) {
+                                int err;
+                                wmin = wmin + 6;
+                                fwmin = (float)INPevaluate(&wmin, &err, 0);
+                                if (err) {
+                                    prev = su_deck;
+                                    su_deck = su_deck->nextcard;
+                                    continue;
+                                }
+                            }
+                            else {
+                                prev = su_deck;
+                                su_deck = su_deck->nextcard;
+                                continue;
+                            }
+                            char *wmax = strstr(curr_line, " wmax=");
+                            if (wmax) {
+                                int err;
+                                wmax = wmax + 6;
+                                fwmax = (float)INPevaluate(&wmax, &err, 0);
+                                if (err) {
+                                    prev = su_deck;
+                                    su_deck = su_deck->nextcard;
+                                    continue;
+                                }
+                            }
+                            else {
+                                prev = su_deck;
+                                su_deck = su_deck->nextcard;
+                                continue;
+                            }
+
+                            char* lmin = strstr(curr_line, " lmin=");
+                            if (lmin) {
+                                int err;
+                                lmin = lmin + 6;
+                                flmin = (float)INPevaluate(&lmin, &err, 0);
+                                if (err) {
+                                    prev = su_deck;
+                                    su_deck = su_deck->nextcard;
+                                    continue;
+                                }
+                            }
+                            else {
+                                prev = su_deck;
+                                su_deck = su_deck->nextcard;
+                                continue;
+                            }
+                            char* lmax = strstr(curr_line, " lmax=");
+                            if (lmax) {
+                                int err;
+                                lmax = lmax + 6;
+                                flmax = (float)INPevaluate(&lmax, &err, 0);
+                                if (err) {
+                                    prev = su_deck;
+                                    su_deck = su_deck->nextcard;
+                                    continue;
+                                }
+                            }
+                            else {
+                                prev = su_deck;
+                                su_deck = su_deck->nextcard;
+                                continue;
+                            }
+
+                            float csl = (float)scale * c->l;
+                            /* scale by nf */
+                            float csw = (float)scale * c->w / c->nf;
+                            /*fprintf(stdout, "Debug: nf = %f\n", c->nf);*/
+                            if (csl >= flmin && csl < flmax && csw >= fwmin && csw < fwmax) {
+                                /* use the current .model card */
+                                prev = su_deck;
+                                su_deck = su_deck->nextcard;
+                                continue;
+                            }
+                            else {
+                                struct card* tmpcard = su_deck->nextcard;
+                                line_free_x(prev->nextcard, FALSE);
+                                su_deck = prev->nextcard = tmpcard;
+                            }
+                        }
+                        su_deck = new_deck;
+                    }
+
+                    if (!su_deck) {
+                        fprintf(stderr, "\nError: Could not find a model for device %s in subcircuit %s\n",
+                            scname, sss->su_name);
+                        controlled_exit(1);
+                    }
+
                     struct card *rest_of_c = c->nextcard;
 
                     /* Now we have to replace this line with the
@@ -711,6 +824,9 @@ struct card * inp_deckcopy(struct card *deck) {
             nd = d = TMALLOC(struct card, 1);
         }
         d->linenum = deck->linenum;
+        d->w = deck->w;
+        d->l = deck->l;
+        d->nf = deck->nf;
         d->line = copy(deck->line);
         if (deck->error)
             d->error = copy(deck->error);
@@ -719,7 +835,6 @@ struct card * inp_deckcopy(struct card *deck) {
     }
     return (nd);
 }
-
 
 /*
  * Copy a deck, without the ->actualLine lines, without comment lines, and
@@ -754,6 +869,9 @@ struct card *inp_deckcopy_oc(struct card * deck)
         else { /* This is the first card */
             nd = d = TMALLOC(struct card, 1);
         }
+        d->w = deck->w;
+        d->l = deck->l;
+        d->nf = deck->nf;
         d->linenum_orig = deck->linenum;
         d->linenum = i++;
         d->line = copy(deck->line);
@@ -770,6 +888,59 @@ struct card *inp_deckcopy_oc(struct card * deck)
     return nd;
 } /* end of function inp_deckcopy_oc */
 
+/*
+ * Copy a deck, without the ->actualLine lines, without comment lines, and
+ * without .control section(s).
+ * Keep the line numbers.
+ */
+struct card* inp_deckcopy_ln(struct card* deck)
+{
+    struct card* d = NULL, * nd = NULL;
+    int skip_control = 0;
+
+    while (deck) {
+        /* exclude any command inside .control ... .endc */
+        if (ciprefix(".control", deck->line)) {
+            skip_control++;
+            deck = deck->nextcard;
+            continue;
+        }
+        else if (ciprefix(".endc", deck->line)) {
+            skip_control--;
+            deck = deck->nextcard;
+            continue;
+        }
+        else if (skip_control > 0) {
+            deck = deck->nextcard;
+            continue;
+        }
+        else if (*(deck->line) == '*') {
+            deck = deck->nextcard;
+            continue;
+        }
+
+        if (nd) { /* First card already found */
+            /* d is the card at the end of the deck */
+            d = d->nextcard = TMALLOC(struct card, 1);
+        }
+        else { /* This is the first card */
+            nd = d = TMALLOC(struct card, 1);
+        }
+        d->w = deck->w;
+        d->l = deck->l;
+        d->nf = deck->nf;
+        d->linenum_orig = deck->linenum_orig;
+        d->linenum = deck->linenum;
+        d->line = copy(deck->line);
+        if (deck->error) {
+            d->error = copy(deck->error);
+        }
+        d->actualLine = NULL;
+        deck = deck->nextcard;
+    } /* end of loop over cards in the source deck */
+
+    return nd;
+} /* end of function inp_deckcopy_ln */
 
 
 /*-------------------------------------------------------------------
@@ -1223,7 +1394,11 @@ translate(struct card *deck, char *formal, char *actual, char *scname, const cha
             tfree(name);
             bxx_putc(&buffer, ' ');
 
-            nnodes = numnodes(c->line, subs, modnames);
+            /* FIXME anothet hack: if no models found for m devices, set number of nodes to 4 */
+            if (!modnames && *(c->line) == 'm')
+                nnodes = get_number_terminals(c->line);
+            else
+                nnodes = numnodes(c->line, subs, modnames);
             while (--nnodes >= 0) {
                 name = gettok_node(&s);
                 if (name == NULL) {
@@ -1470,6 +1645,8 @@ numnodes(const char *line, struct subs *subs, wordlist const *modnames)
     /* inp_numnodes(c) call must be regarded as "maximum number of nodes */
     /* for a given device type.                                          */
     /* Paolo Nenzi Jan-2001                                              */
+
+    /* If model names equal node names, this code will fail! */
 
     if ((c == 'm') || (c == 'p') || (c == 'q')) { /* IF this is a mos, cpl or bjt*/
         char *s = nexttok(line);       /* Skip the instance name */

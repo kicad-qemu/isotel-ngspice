@@ -4,15 +4,15 @@
 #
 # (Process this file with autoconf to produce a configure script.)
 #
-# This configure file has been updated to mostly follow the guidence in the
+# This configure file has been updated to mostly follow the guidance in the
 # GNU Autoconf manual for version 2.59
 
 
-# Initialisation
+# Initialization
 # ---------------
 
-# Initialisation of configure
-AC_INIT([ngspice], [33], [http://ngspice.sourceforge.net/bugrep.html])
+# Initialization of configure
+AC_INIT([ngspice], [34+], [http://ngspice.sourceforge.net/bugrep.html])
 
 # Unique file in the source directory
 AC_CONFIG_SRCDIR([src/ngspice.c])
@@ -22,19 +22,20 @@ AC_CONFIG_SRCDIR([src/ngspice.c])
 # problem to the user.  (2.52 is a guess and might need some adjustment)
 AC_PREREQ([2.59])
 
-# Revison stamp the generated ./configure script
+# Revision stamp the generated ./configure script
 AC_REVISION([$Revision$])
 
 # Create a configuration header
 AC_CONFIG_HEADER([src/include/ngspice/config.h])
 
-# Initialise automake stuff
+# Initialize automake stuff
 AM_INIT_AUTOMAKE([-Wall -Werror nostdinc serial-tests])
 m4_ifdef([AM_SILENT_RULES], [AM_SILENT_RULES([yes])])
 
 ext_CFLAGS="${CFLAGS+yes}"
 
 AC_PROG_CC
+AC_PROG_CXX
 AX_PROG_CC_FOR_BUILD
 
 m4_ifdef([AM_PROG_AR], [AM_PROG_AR])
@@ -42,6 +43,8 @@ m4_ifdef([AM_PROG_AR], [AM_PROG_AR])
 AC_SUBST([AM_CPPFLAGS], ['-I. -I$(srcdir) -I$(top_builddir)/src/include'])
 
 AC_CONFIG_MACRO_DIR([m4])
+
+
 
 # Package Options
 # ---------------
@@ -657,9 +660,6 @@ AC_HEADER_STDBOOL
 AC_TYPE_SIZE_T
 
 # Checks for library functions.
-AC_FUNC_ALLOCA
-AC_FUNC_MALLOC
-AC_FUNC_REALLOC
 AC_FUNC_CLOSEDIR_VOID
 AC_FUNC_SELECT_ARGTYPES
 AC_FUNC_SETVBUF_REVERSED
@@ -670,9 +670,9 @@ AC_FUNC_VPRINTF
 #  that is how it has been historically.  Using --enable-rpath will turn this on
 
 _use_rpath=no
-AC_MSG_CHECKING([if hardcoding of the X11 runtime library path is desired])
+AC_MSG_CHECKING([if hard-coding of the X11 runtime library path is desired])
 AC_ARG_ENABLE([rpath],
-    [AS_HELP_STRING([--enable-rpath], [Enable hardcoding the X11 runtime library path])],
+    [AS_HELP_STRING([--enable-rpath], [Enable hard-coding the X11 runtime library path])],
     [   if test "x$enable_rpath" = xno ; then
             AC_MSG_RESULT([no])
             _use_rpath=no
@@ -685,6 +685,7 @@ AC_ARG_ENABLE([rpath],
         _use_rpath=no
     ]
 )
+
 
 if test "x$_use_rpath" = xyes ; then
     # Try to figure out if we need -Rpath for finding X11 libs
@@ -770,6 +771,11 @@ esac
 AM_CONDITIONAL([NO_X], [test "x$has_no_x" = xtrue])
 AM_CONDITIONAL([NO_HELP], [test "x$has_no_help" = xtrue])
 
+# Additional libs of hicum group
+AC_CHECK_LIB(stdc++, main, XTRALIBS="$XTRALIBS -lstdc++",,)
+AC_SUBST(XTRALIBS, $XTRALIBS)
+
+LIBS="$LIBS $XTRALIBS"
 
 # enabling making of the old and outdated applications
 # ngsconvert ngproc2mod ngmultidec ngmakeidx nghelp
@@ -926,11 +932,6 @@ fi
 # Recapitulate settings:
 AC_MSG_RESULT([Settings which were chosen:])
 
-if test "x$enable_sense2" = xyes; then
-    AC_DEFINE([WANT_SENSE2], [], [Define if we want spice2 sensitivity analysis])
-    AC_MSG_RESULT([Spice2 sensitivity analysis enabled])
-    AC_MSG_WARN([This feature is UNSUPPORTED])
-fi
 if test "x$enable_nobypass" = xyes; then
     AC_DEFINE([NOBYPASS], [], [Define if we want NOBYPASS])
     AC_MSG_RESULT([NOBYPASS option enabled])
@@ -968,7 +969,7 @@ if test "x$enable_ftedebug" = xyes; then
     AC_MSG_RESULT([WARNING: Frontend debug is enabled])
 fi
 if test "x$enable_sensdebug" = xyes; then
-    AC_DEFINE([SENSDEBUG], [], [Define if we want debug sensititvity analysis])
+    AC_DEFINE([SENSDEBUG], [], [Define if we want debug sensitivity analysis])
     AC_MSG_RESULT([WARNING: Sensitivity code debug *SENSDEBUG* is enabled])
 fi
 if test "x$enable_asdebug" = xyes; then
@@ -1095,26 +1096,35 @@ if test "x$enable_adms" = xyes ; then
     fi
     AC_DEFINE([ADMS], [1], [Support for Verilog-A models])
 
-    VLADEVDIR=" adms/ekv \
+    VLADEVDIR=" adms/bsimbulk \
+                adms/bsimcmg \
+                adms/ekv \
                 adms/hicum0 \
-                adms/hicum2 \
                 adms/mextram \
-                adms/psp102 "
+                adms/psp102 \
+                adms/psp103 \
+                adms/r2_cmc "
 
 # The makefiles for adms (to be added to AC_CONFIG_FILES by ./autogen.sh --adms)
+#VLAMKF    src/spicelib/devices/adms/bsimbulk/Makefile
+#VLAMKF    src/spicelib/devices/adms/bsimcmg/Makefile
 #VLAMKF    src/spicelib/devices/adms/ekv/Makefile
 #VLAMKF    src/spicelib/devices/adms/hicum0/Makefile
-#VLAMKF    src/spicelib/devices/adms/hicum2/Makefile
 #VLAMKF    src/spicelib/devices/adms/mextram/Makefile
 #VLAMKF    src/spicelib/devices/adms/psp102/Makefile
+#VLAMKF    src/spicelib/devices/adms/psp103/Makefile
+#VLAMKF    src/spicelib/devices/adms/r2_cmc/Makefile
 
     NOTVLADEVDIR=""
 
-    VLADEV=" spicelib/devices/adms/ekv/libekv.la \
+    VLADEV=" spicelib/devices/adms/bsimbulk/libbsimbulk.la \
+             spicelib/devices/adms/bsimcmg/libbsimcmg.la \
+             spicelib/devices/adms/ekv/libekv.la \
              spicelib/devices/adms/hicum0/libhicum0.la \
-             spicelib/devices/adms/hicum2/libhicum2.la \
              spicelib/devices/adms/mextram/libbjt504t.la \
-             spicelib/devices/adms/psp102/libpsp102.la "
+             spicelib/devices/adms/psp102/libpsp102.la \
+             spicelib/devices/adms/psp103/libpsp103.la \
+             spicelib/devices/adms/r2_cmc/libr2_cmc.la "
 
 else
 
@@ -1242,6 +1252,7 @@ AC_CONFIG_FILES([Makefile
                  src/spicelib/devices/isrc/Makefile
                  src/spicelib/devices/hfet1/Makefile
                  src/spicelib/devices/hfet2/Makefile
+                 src/spicelib/devices/hicum2/Makefile
                  src/spicelib/devices/hisim2/Makefile
                  src/spicelib/devices/hisimhv1/Makefile
                  src/spicelib/devices/hisimhv2/Makefile
@@ -1286,6 +1297,7 @@ AC_CONFIG_FILES([Makefile
                  src/frontend/trannoise/Makefile
                  src/frontend/wdisp/Makefile
                  src/include/ngspice/Makefile
+                 src/include/cppduals/duals/Makefile
                  src/maths/Makefile
                  src/maths/cmaths/Makefile
                  src/maths/fft/Makefile
@@ -1305,7 +1317,6 @@ AC_CONFIG_FILES([Makefile
                  src/xspice/enh/Makefile
                  src/xspice/ipc/Makefile
                  src/xspice/idn/Makefile
-                 src/unsupported/Makefile
                  tests/Makefile
                  tests/bsim1/Makefile
                  tests/bsim2/Makefile
@@ -1318,6 +1329,7 @@ AC_CONFIG_FILES([Makefile
                  tests/filters/Makefile
                  tests/general/Makefile
                  tests/hfet/Makefile
+                 tests/hicum2/Makefile
                  tests/hisim/Makefile
                  tests/hisimhv1/Makefile
                  tests/hisimhv2/Makefile

@@ -1,9 +1,6 @@
 ## Process this file with automake to produce Makefile.in
 
-nodist_pkginclude_HEADERS = \
-	config.h
-
-pkginclude_HEADERS = \
+noinst_HEADERS = \
 	tclspice.h	\
 	acdefs.h	\
 	bdrydefs.h	\
@@ -128,5 +125,10 @@ pkginclude_HEADERS = \
 	wallace.h	\
 	wincolornames.h	\
 	wstdio.h
+
+if SHARED_MODULE
+pkginclude_HEADERS = \
+	sharedspice.h
+endif SHARED_MODULE
 
 MAINTAINERCLEANFILES = Makefile.in

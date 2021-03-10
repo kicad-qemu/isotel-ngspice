@@ -31,6 +31,7 @@ extern long dynsubst;           /* see inpcom.c */
 #define  S_unop   3
 #define  S_stop   4
 
+static char* sort_idlist(char *list);
 
 static double
 ternary_fcn(double conditional, double if_value, double else_value)
@@ -1062,7 +1063,7 @@ static void
 double_to_string(DSTRINGPTR qstr_p, double value)
 {
     char buf[ACT_CHARACTS + 1];
-    if (snprintf(buf, sizeof(buf), "% 25.17e", value) != ACT_CHARACTS) {
+    if (snprintf(buf, sizeof(buf), "% 23.15e  ", value) != ACT_CHARACTS) {
         fprintf(stderr, "ERROR: xpressn.c, %s(%d)\n", __FUNCTION__, __LINE__);
         controlled_exit(1);
     }
@@ -1424,13 +1425,10 @@ nupa_subcktcall(dico_t *dico, const char *s, const char *x,
     const char *i2 = strstr(ds_get_buf(&tstr), "params:");
 
     if (i2) {
-        const char *optr, *jptr;
-
-        pscopy(&tstr, i2 + 7, NULL);
+        const char* optr, * jptr;
 
         /* search identifier to the left of '=' assignments */
-
-        for (optr = ds_get_buf(&tstr);
+        for (optr = i2 + 7;
                 (jptr = strchr(optr, '=')) != NULL;
                 optr = jptr + 1)
         {
@@ -1543,13 +1541,18 @@ nupa_subcktcall(dico_t *dico, const char *s, const char *x,
         /* ;} else { debugwarn(dico, idlist) */
     }
 
-    err = nupa_assignment(dico, ds_get_buf(&idlist), 'N');
+    /* sort the idlist, so that plain numerical entries like nf=2 move to the front */
+    char* sortedlist = sort_idlist(ds_get_buf(&idlist));
+
+    err = nupa_assignment(dico, sortedlist, 'N');
 
     ds_free(&subname);
     ds_free(&tstr);
     ds_free(&ustr);
     ds_free(&vstr);
     ds_free(&idlist);
+
+    tfree(sortedlist);
 
     return err;
 }
@@ -1570,3 +1573,34 @@ const struct nupa_type S_nupa_real = { "NUPA_REAL" };
 const struct nupa_type S_nupa_string = { "NUPA_STRING" };
 const struct nupa_type S_nupa_subckt = { "NUPA_SUBCKT" };
 const struct nupa_type S_nupa_unknown = { "NUPA_UNKNOWN" };
+
+/* get the instance line list, sort numerical entries (eg. nf=1) to the front */
+static char* sort_idlist(char* list) {
+    wordlist* wl = NULL, *wle = NULL;
+    bool start = TRUE;
+    char* cut_list = list, *ret;
+    while (*cut_list != '\0') {
+        int error;
+        char* token = gettok_char(&cut_list, ';', TRUE, FALSE);
+        char* eqstr = strchr(token, '=');
+        eqstr++;
+        INPevaluate(&eqstr, &error, 1);
+        /* num entry, prepend word */
+        if (error == 0 && *eqstr == '\0') {
+            wle = wl_cons(token, wle);
+            if (start)
+                wl = wle;
+            start = FALSE;
+        }
+        /* expression, append word */
+        else {
+            wl_append_word(&wl, &wl, token);
+            if (start)
+                wle = wl;
+            start = FALSE;
+        }
+    }
+    ret = wl_flatten(wle);
+    wl_free(wle);
+    return ret;
+}

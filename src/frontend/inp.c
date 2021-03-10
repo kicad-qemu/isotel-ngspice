@@ -41,7 +41,7 @@ Author: 1985 Wayne A. Christopher
 #include "numparam/numpaif.h"
 #include "ngspice/stringskip.h"
 #include "ngspice/randnumb.h"
-
+#include "ngspice/compatmode.h"
 
 #define line_free(line, flag)                   \
     do {                                        \
@@ -55,7 +55,7 @@ static struct card *mc_deck = NULL;
 static struct card *recent_deck = NULL;
 
 static void cktislinear(CKTcircuit *ckt, struct card *deck);
-void create_circbyline(char *line);
+void create_circbyline(char *line, bool reset, bool lastline);
 static bool doedit(char *filename);
 static void dotifeval(struct card *deck);
 static void eval_agauss(struct card *deck, char *fcn);
@@ -64,6 +64,7 @@ static wordlist *inp_savecurrents(struct card *deck, struct card *options,
 void line_free_x(struct card *deck, bool recurse);
 static void recifeval(struct card *pdeck);
 static char *upper(register char *string);
+static void rem_unused_mos_models(struct card* deck);
 
 
 
@@ -74,6 +75,11 @@ static bool mc_reload = FALSE;
 void eval_seed_opt(struct card *deck);
 
 extern bool ft_batchmode;
+
+/* from inpcom.c */
+extern struct nscope* inp_add_levels(struct card *deck);
+extern void comment_out_unused_subckt_models(struct card *deck);
+extern void inp_rem_unused_models(struct nscope *root, struct card *deck);
 
 #ifdef SHARED_MODULE
 extern void exec_controls(wordlist *controls);
@@ -184,11 +190,13 @@ com_listing(wordlist *wl)
 static char *
 upper(char *string)
 {
-    static char buf[BSIZE_SP];
+    static char buf[LBSIZE_SP];
 
     if (string) {
-        strncpy(buf, string, BSIZE_SP - 1);
-        buf[BSIZE_SP - 1] = '\0';
+        if (strlen(string) > LBSIZE_SP - 1)
+            fprintf(stderr, "Warning: output of command 'listing' will be truncated\n");
+        strncpy(buf, string, LBSIZE_SP - 1);
+        buf[LBSIZE_SP - 1] = '\0';
         inp_casefix(buf);
     } else {
         strcpy(buf, "<null>");
@@ -747,6 +755,42 @@ inp_spsource(FILE *fp, bool comfile, char *filename, bool intfile)
                 for (ii = 0; ii < 5; ii++)
                     eval_agauss(deck, statfcn[ii]);
             }
+
+            /* If we have large PDK deck, search for scale option and set 
+            the variable 'scale'*/
+            if (newcompat.hs || newcompat.spe) {
+                struct card* scan;
+                double dscale = 1;
+                /* from .options */
+                for (scan = options; scan; scan = scan->nextcard) {
+                    char* tmpscale = strstr(scan->line, "scale=");
+                    if (tmpscale) {
+                        int err;
+                        tmpscale = tmpscale + 6;
+                        dscale = INPevaluate(&tmpscale, &err, 1);
+                        if (err == 0)
+                            cp_vset("scale", CP_REAL, &dscale);
+                        else
+                            fprintf(stderr, "\nError: Could not set 'scale' variable\n");
+                        break;
+                    }
+                }
+                /* from options in a .control section */
+                for (scan = com_options; scan; scan = scan->nextcard) {
+                    char* tmpscale = strstr(scan->line, "scale=");
+                    if (tmpscale) {
+                        int err;
+                        tmpscale = tmpscale + 6;
+                        dscale = INPevaluate(&tmpscale, &err, 1);
+                        if (err == 0)
+                            cp_vset("scale", CP_REAL, &dscale);
+                        else
+                            fprintf(stderr, "\nError: Could not set 'scale' variable\n");
+                        break;
+                    }
+                }
+            }
+
             /* Now expand subcircuit macros and substitute numparams.*/
             if (!cp_getvar("nosubckt", CP_BOOL, NULL, 0))
                 if ((deck->nextcard = inp_subcktexpand(deck->nextcard)) == NULL) {
@@ -839,6 +883,13 @@ inp_spsource(FILE *fp, bool comfile, char *filename, bool intfile)
             /* If user wants all currents saved (.options savecurrents), add .save 
             to wl_first with all terminal currents available on selected devices */
             wl_first = inp_savecurrents(deck, options, wl_first, controls);
+
+            /* Circuit is flat, all numbers expanded.
+               So again try to remove unused MOS models.
+               All binning models are still here when w or l have been
+               determined by an expression. */
+           if (newcompat.hs || newcompat.spe)
+              rem_unused_mos_models(deck->nextcard);
 
             /* now load deck into ft_curckt -- the current circuit. */
             if(inp_dodeck(deck, tt, wl_first, FALSE, options, filename) != 0)
@@ -947,6 +998,21 @@ inp_spsource(FILE *fp, bool comfile, char *filename, bool intfile)
             else
                 fprintf(stderr, "Warning: Cannot open file debug-out3.txt for saving debug info\n");
         }
+
+        /* Remove comment lines 
+        if (newcompat.hs || newcompat.spe) {
+            struct card *prev, *fcard, *tmpdeck;
+            prev = deck;
+            tmpdeck = deck->nextcard;
+            for (fcard = tmpdeck; fcard; fcard = fcard->nextcard) {
+                if (*(prev->nextcard->line) == '*') {
+                    struct card* tmpcard = fcard->nextcard;
+                    line_free_x(prev->nextcard, FALSE);
+                    fcard = prev->nextcard = tmpcard;
+                }
+                prev = fcard;
+            }
+        }*/
 
         /* Now the circuit is defined, so generate the parse trees */
         inp_parse_temper_trees(ft_curckt);
@@ -1094,7 +1160,7 @@ inp_dodeck(
             case CP_REAL:
                 if (strcmp("scale", eev->va_name) == 0) {
                     cp_vset("scale", CP_REAL, &eev->va_real);
-                    printf("Scale set\n");
+                    printf("Scale set to %g\n", eev->va_real);
                 }
                 break;
             case CP_STRING:
@@ -1714,10 +1780,16 @@ static void cktislinear(CKTcircuit *ckt, struct card *deck)
 char **circarray;
 
 
-void create_circbyline(char *line)
+void create_circbyline(char *line, bool reset, bool lastline)
 {
     static unsigned int linec = 0;
     static unsigned int n_elem_alloc = 0;
+
+    if (reset) {
+        linec = 0;
+        n_elem_alloc = 0;
+        tfree(circarray);
+    }
 
     /* Ensure up to 2 cards can be added */
     if (n_elem_alloc < linec + 2) {
@@ -1752,6 +1824,10 @@ void create_circbyline(char *line)
         linec = 0;
         n_elem_alloc = 0;
     }
+    /* If the .end statement is missing */
+    else if (lastline) {
+        fprintf(stderr, "Error: .end statement is missing in netlist!\n");
+    }
 } /* end of function create_circbyline */
 
 
@@ -1764,7 +1840,7 @@ void com_circbyline(wordlist *wl)
        This memory will be released line by line in inp_source(). */
 
     char *newline = wl_flatten(wl);
-    create_circbyline(newline);
+    create_circbyline(newline, FALSE, FALSE);
 }
 
 /* handle .if('expr') ... .elseif('expr') ... .else ... .endif statements.
@@ -2274,5 +2350,222 @@ eval_agauss(struct card *deck, char *fcn)
             tfree(contstr);
             tfree(midstr);
         }
+    }
+}
+
+struct mlist {
+    struct card* mod;
+    struct card* prevmod;
+    struct card* prevcard;
+    char* mname;
+    float wmin;
+    float wmax;
+    float lmin;
+    float lmax;
+    struct mlist* nextm;
+    bool used;
+    bool checked;
+};
+
+/* Finally get rid of unused MOS models */
+static void rem_unused_mos_models(struct card* deck) {
+    struct card *tmpc, *tmppc = NULL;
+    struct mlist* modellist = NULL, *tmplist;
+    double scale;
+    if (!cp_getvar("scale", CP_REAL, &scale, 0))
+        scale = 1;
+    /* the old way to remove unused models */
+    struct nscope* root = inp_add_levels(deck);
+    comment_out_unused_subckt_models(deck);
+    inp_rem_unused_models(root, deck);
+    /* remove unused binning models */
+    for (tmpc = deck; tmpc; tmppc = tmpc, tmpc = tmpc->nextcard) {
+        char* curr_line;
+        char* nline = curr_line = tmpc->line;
+        if (ciprefix(".model", nline)) {
+            float fwmin, fwmax, flmin, flmax;
+            char* wmin = strstr(curr_line, " wmin=");
+            if (wmin) {
+                int err;
+                wmin = wmin + 6;
+                wmin = skip_ws(wmin);
+                fwmin = (float)INPevaluate(&wmin, &err, 0);
+                if (err) {
+                    continue;
+                }
+            }
+            else {
+                continue;
+            }
+            char* wmax = strstr(curr_line, " wmax=");
+            if (wmax) {
+                int err;
+                wmax = wmax + 6;
+                wmax = skip_ws(wmax);
+                fwmax = (float)INPevaluate(&wmax, &err, 0);
+                if (err) {
+                    continue;
+                }
+            }
+            else {
+                continue;
+            }
+
+            char* lmin = strstr(curr_line, " lmin=");
+            if (lmin) {
+                int err;
+                lmin = lmin + 6;
+                lmin = skip_ws(lmin);
+                flmin = (float)INPevaluate(&lmin, &err, 0);
+                if (err) {
+                    continue;
+                }
+            }
+            else {
+                continue;
+            }
+            char* lmax = strstr(curr_line, " lmax=");
+            if (lmax) {
+                int err;
+                lmax = lmax + 6;
+                lmax = skip_ws(lmax);
+                flmax = (float)INPevaluate(&lmax, &err, 0);
+                if (err) {
+                    continue;
+                }
+            }
+            else {
+                continue;
+            }
+
+            nline = nexttok(nline);
+            char* modname = gettok(&nline);
+            struct mlist* newm = TMALLOC(struct mlist, 1);
+            newm->mname = modname;
+            newm->mod = tmpc;
+            newm->prevmod = tmppc;
+            newm->wmin = newm->wmax = newm->lmin = newm->lmax = 0.;
+            newm->nextm = NULL;
+            newm->used = FALSE;
+            newm->checked = FALSE;
+            newm->lmax = flmax;
+            newm->lmin = flmin;
+            newm->wmax = fwmax;
+            newm->wmin = fwmin;
+
+            if (!modellist) {
+                modellist = newm;
+            }
+            else {
+                struct mlist* tmpl = modellist;
+                modellist = newm;
+                modellist->nextm = tmpl;
+            }
+            modellist->prevcard = tmppc;
+        }
+    }
+    for (tmpc = deck; tmpc; tmpc = tmpc->nextcard) {
+        char* curr_line = tmpc->line;
+        /* We only look for MOS devices and extract W, L, nf, and wnflag */
+        if (*curr_line == 'm') {
+            float w = 0., l = 0., nf = 1., wnf = 1.;
+            int wnflag = 0;
+            char* wstr = strstr(curr_line, " w=");
+            if (wstr) {
+                int err;
+                wstr = wstr + 3;
+                wstr = skip_ws(wstr);
+                w = (float)INPevaluate(&wstr, &err, 0);
+                if (err) {
+                    continue;
+                }
+            }
+            char* lstr = strstr(curr_line, " l=");
+            if (lstr) {
+                int err;
+                lstr = lstr + 3;
+                lstr = skip_ws(lstr);
+                l = (float)INPevaluate(&lstr, &err, 0);
+                if (err) {
+                    continue;
+                }
+            }
+            char* nfstr = strstr(curr_line, " nf=");
+            if (nfstr) {
+                int err;
+                nfstr = nfstr + 4;
+                nfstr = skip_ws(nfstr);
+                nf = (float)INPevaluate(&nfstr, &err, 0);
+                if (err) {
+                    continue;
+                }
+            }
+            char* wnstr = strstr(curr_line, " wnflag=");
+            if (wnstr) {
+                int err;
+                wnstr = wnstr + 8;
+                wnstr = skip_ws(wnstr);
+                wnf = (float)INPevaluate(&wnstr, &err, 0);
+                if (err) {
+                    continue;
+                }
+            }
+            if (!cp_getvar("wnflag", CP_NUM, &wnflag, 0)) {
+                if (newcompat.spe || newcompat.hs)
+                    wnflag = 1;
+                else
+                    wnflag = 0;
+            }
+
+            nf = wnflag * wnf > 0.5f ? nf : 1.f;
+            w = w / nf;
+
+            /* what is the device's model name? */
+            char* mname = nexttok(curr_line);
+            int nonodes = 4; /* FIXME: this is a hack! How to really detect the number of nodes? */
+            int jj;
+            for (jj = 0; jj < nonodes; jj++) {
+                mname = nexttok(mname);
+            }
+            mname = gettok(&mname);
+            /* We now check all models */
+            for (tmplist = modellist; tmplist; tmplist = tmplist->nextm) {
+                if (strstr(tmplist->mname, mname)) {
+                    float ls = l * (float)scale;
+                    float ws = w * (float)scale;
+                    if (tmplist->lmin <= ls && tmplist->lmax >= ls && tmplist->wmin <= ws && tmplist->wmax >= ws)
+                        tmplist->used = TRUE;
+                    else
+                        tmplist->checked = TRUE;
+                }
+                else {
+                    tmplist->checked = TRUE;
+                }
+            }
+            tfree(mname);
+        }
+    }
+
+    /* Delete the models that have been checked, but are unused */
+    for (tmplist = modellist; tmplist; tmplist = tmplist->nextm) {
+        if (tmplist->checked && !tmplist->used) {
+            if (tmplist->prevcard == NULL) {
+                struct card* tmpcard = tmplist->mod;
+                tmplist->mod = tmplist->mod->nextcard;
+                line_free_x(tmpcard, FALSE);
+            }
+            else {
+                struct card* tmpcard = tmplist->prevcard;
+                tmpcard->nextcard = tmplist->mod->nextcard;
+                line_free_x(tmplist->mod, FALSE);
+            }
+        }
+    }
+    /* Remove modellist */
+    while (modellist) {
+        struct mlist* tlist = modellist->nextm;
+        tfree(modellist->mname);
+        tfree(modellist);
+        modellist = tlist;
     }
 }
