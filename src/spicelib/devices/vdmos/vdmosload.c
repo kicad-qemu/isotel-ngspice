@@ -56,7 +56,7 @@ VDMOSload(GENmodel *inModel, CKTcircuit *ckt)
     int Check_th, Check_dio;
     int error;
 
-    register int selfheat;
+    int selfheat;
     double rd0T, rd1T, dBeta_dT, dIds_dT;
     double Vrd=0.0, dIth_dVrd=0.0, dIrd_dT=0.0;
     double drd0T_dT, drd1T_dT, drd_dT, dgdrain_dT=0.0;
@@ -89,7 +89,6 @@ VDMOSload(GENmodel *inModel, CKTcircuit *ckt)
              * here.  They may be moved at the expense of instance size
              */
 
-            delTemp = 0.0;
             if ((ckt->CKTmode & MODEINITSMSIG)) {
                 vgs = *(ckt->CKTstate0 + here->VDMOSvgs);
                 vds = *(ckt->CKTstate0 + here->VDMOSvds);
@@ -229,7 +228,6 @@ VDMOSload(GENmodel *inModel, CKTcircuit *ckt)
                                             delTemp = *(ckt->CKTstate0 + here->VDMOSdelTemp);
                                             /*  calculate Vds for temperature conductance calculation
                                                 in bypass (used later when filling Temp node matrix)  */
-                                            Vds = here->VDMOSmode > 0 ? vds : -vds;
                                             cdrain = here->VDMOSmode * (here->VDMOScd);
                                             if (ckt->CKTmode & (MODETRAN | MODETRANOP)) {
                                                 capgs = (*(ckt->CKTstate0 + here->VDMOScapgs) +
@@ -260,7 +258,6 @@ VDMOSload(GENmodel *inModel, CKTcircuit *ckt)
                                     , von);
                     vds = vgs - vgd;
                     vds = DEVlimvds(vds, *(ckt->CKTstate0 + here->VDMOSvds));
-                    vgd = vgs - vds;
                 } else {
                     vgd = DEVfetlim(vgd, vgdo, von);
                     vds = vgs - vgd;
@@ -682,10 +679,6 @@ bypass:
             double tol;     /* temporary for tolerance calculations */
 #endif
 
-            cd = 0.0;
-            cdb = 0.0;
-            gd = 0.0;
-            gdb = 0.0;
             gspr = here->VDIOtConductance;
 
             vt = CONSTKoverQ * Temp;
@@ -810,7 +803,7 @@ bypass:
                 /*
                 *   charge storage elements
                 */
-                double czero, czof2, diffcharge, deplcharge, diffcap, deplcap;
+                double czero, diffcharge, deplcharge, diffcap, deplcap;
                 czero = here->VDIOtJctCap;
                 if (vd < here->VDIOtDepCap) {
                     arg = 1 - vd / here->VDIOtJctPot;
@@ -818,6 +811,7 @@ bypass:
                     deplcharge = here->VDIOtJctPot*czero*(1 - arg*sarg) / (1 - here->VDIOtGradingCoeff);
                     deplcap = czero*sarg;
                 } else {
+                    double czof2;
                     czof2 = czero / here->VDIOtF2;
                     deplcharge = czero*here->VDIOtF1 + czof2*(here->VDIOtF3*(vd - here->VDIOtDepCap) +
                                  (here->VDIOtGradingCoeff / (here->VDIOtJctPot + here->VDIOtJctPot))*(vd*vd - here->VDIOtDepCap*here->VDIOtDepCap));

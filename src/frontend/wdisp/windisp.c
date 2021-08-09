@@ -15,6 +15,7 @@
 #include "ngspice/ftedev.h"
 #include "ngspice/ftedbgra.h"
 #include "ngspice/fteext.h"
+#include "ngspice/stringskip.h"
 #include "../plotting/graf.h"
 #include "../plotting/graphdb.h"
 #include "windisp.h"
@@ -52,7 +53,10 @@ void WPRINT_PrintInit(HWND hwnd);              /* Windows printer init */
 void WaitForIdle(void);                        /* wait until no more events */
 
 static void WIN_ScreentoData(GRAPH *graph, int x, int y, double *fx, double *fy);
-static LRESULT HcpyPlot(HWND hwnd);
+static LRESULT HcpyPlotPS(HWND hwnd);
+static LRESULT HcpyPlotPSBW(HWND hwnd);
+static LRESULT HcpyPlotSVG(HWND hwnd);
+static LRESULT HcpyPlotSVGBW(HWND hwnd);
 static LRESULT HcpyPlotBW(HWND hwnd);
 static LRESULT PrintPlot(HWND hwnd);
 static LRESULT PrintInit(HWND hwnd);
@@ -66,6 +70,7 @@ extern int         DevSwitch(char *devname);
 extern int         NewViewport(GRAPH *pgraph);
 extern void        com_hardcopy(wordlist *wl);
 extern void        wincolor_graph(COLORREF* ColorTable, int noc, GRAPH* graph);
+extern void        UpdateMainText(void);
 
 /* defines */
 #define RAD_TO_DEG   (180.0 / M_PI)
@@ -88,18 +93,24 @@ static WNDCLASSW     TheWndClassW;                  /* Plot-window class */
 static HFONT         PlotFont;                     /* which font */
 #define              ID_DRUCKEN      0xEFF0        /* System Menue: print */
 #define              ID_DRUCKEINR    0xEFE0        /* System Menue: printer setup */
-#define              ID_HARDCOPY     0xEFD0        /* System Menue: hardcopy color*/
-#define              ID_HARDCOPY_BW  0xEFB0        /* System Menue: hardcopy b&w*/
+#define              ID_HARDCOPY_PS     0xEFD0        /* System Menue: hardcopy PS color*/
+#define              ID_HARDCOPY_PS_BW  0xEFB0        /* System Menue: hardcopy PS b&w*/
+#define              ID_HARDCOPY_SVG    0xEFA0        /* System Menue: hardcopy SVG color*/
+#define              ID_HARDCOPY_SVG_BW 0xEF00        /* System Menue: hardcopy SVG b&w*/
 #define              ID_MASK         0xFFF0;       /* System-Menue: mask */
 
 static char         *STR_DRUCKEN   = "Printer..."; /* System menue strings */
 static char         *STR_DRUCKEINR = "Printer setup...";
-static char         *STR_HARDCOPY = "Postscript file, color";
-static char         *STR_HARDCOPY_BW = "Postscript file, b&w";
+static char         *STR_HARDCOPY_PS = "Postscript file, color";
+static char         *STR_HARDCOPY_PS_BW = "Postscript file, b&w";
+static char         *STR_HARDCOPY_SVG = "SVG file, color";
+static char         *STR_HARDCOPY_SVG_BW = "SVG file, b&w";
 static wchar_t *     STRW_DRUCKEN   = L"Printer..."; /* System menue strings */
 static wchar_t *     STRW_DRUCKEINR = L"Printer setup...";
 static wchar_t *     STRW_HARDCOPY  = L"Postscript file, color";
 static wchar_t *     STRW_HARDCOPY_BW = L"Postscript file, b&w";
+static wchar_t *     STRW_HARDCOPY_SVG = L"SVG file, color";
+static wchar_t *     STRW_HARDCOPY_SVG_BW = L"SVG file, b&w";
 static bool          isblack = TRUE;               /* background color of plot is black */
 static bool          isblackold = TRUE;
 static int           linewidth = 0;                /* linewidth of grid and plot */
@@ -268,24 +279,83 @@ static int LType(int ColorIndex)
 
 /* postscript hardcopy from a plot window */
 /* called by SystemMenue / Postscript hardcopy */
-static LRESULT HcpyPlot(HWND hwnd)
+static LRESULT HcpyPlotPS(HWND hwnd)
 {
-    int colorval = isblack? 0 : 1;
-    NG_IGNORE(hwnd);
-    cp_vset("hcopypscolor", CP_NUM, &colorval);
+    int i = 1;
+    GRAPH* tmpgr = currentgraph;
+    currentgraph = pGraph(hwnd);
+    cp_vset("hcopydevtype", CP_STRING, "postscript");
+    /* If not set, the color will be b&w, i = 1 is white background */
+    cp_vset("hcopypscolor", CP_NUM, &i);
     com_hardcopy(NULL);
+    currentgraph = tmpgr;
+    /* update the text in the main window */
+    UpdateMainText();
+    SetFocus(swString);
     return 0;
 }
 
+/* postscript hardcopy from a plot window */
+/* called by SystemMenue / SVG hardcopy */
+static LRESULT HcpyPlotSVG(HWND hwnd)
+{
+    GRAPH* tmpgr = currentgraph;
+    currentgraph = pGraph(hwnd);
+    cp_vset("hcopydevtype", CP_STRING, "svg");
+    com_hardcopy(NULL);
+    currentgraph = tmpgr;
+    /* update the text in the main window */
+    UpdateMainText();
+    SetFocus(swString);
+    return 0;
+}
+
+static LRESULT HcpyPlotPSBW(HWND hwnd)
+{
+    cp_vset("hcopydevtype", CP_STRING, "postscript");
+    return HcpyPlotBW(hwnd);
+}
+
+static LRESULT HcpyPlotSVGBW(HWND hwnd)
+{
+    cp_vset("hcopydevtype", CP_STRING, "svg");
+    return HcpyPlotBW(hwnd);
+}
 
 static LRESULT HcpyPlotBW(HWND hwnd)
 {
-    int bgcolor;
     NG_IGNORE(hwnd);
-    if (cp_getvar("hcopypscolor", CP_NUM, &bgcolor, 0)) {
-        cp_remvar("hcopypscolor");
+    unsigned int  colorid;
+    char colorN[16], colorstring[30], tmpcolor[16][30];
+
+    /* save current colors, set color0 to white and alls others to black  */
+    for (colorid = 0; colorid < 16; ++colorid) {
+        sprintf(colorN, "color%d", colorid);
+        if (cp_getvar(colorN, CP_STRING, colorstring, sizeof(colorstring))) {
+            strcpy(tmpcolor[colorid], colorstring);
+        }
+        else {
+            strcpy(tmpcolor[colorid], "empty");
+        }
+        if (colorid == 0)
+            cp_vset(colorN, CP_STRING, "white");
+        else
+            cp_vset(colorN, CP_STRING, "black");
     }
+
+    /* The plot file creation */
     com_hardcopy(NULL);
+
+    /* reset colorN to the previous values */
+    for (colorid = 0; colorid < 16; ++colorid) {
+        sprintf(colorN, "color%d", colorid);
+        if (strcmp(tmpcolor[colorid], "empty") == 0) {
+            cp_remvar(colorN);
+        }
+        else {
+            cp_vset(colorN, CP_STRING, tmpcolor[colorid]);
+        }
+    }
     return 0;
 }
 
@@ -390,8 +460,10 @@ LRESULT CALLBACK PlotWindowProc(HWND hwnd, UINT uMsg,
         switch(cmd) {
         case ID_DRUCKEN:     return PrintPlot(hwnd);
         case ID_DRUCKEINR:   return PrintInit(hwnd);
-        case ID_HARDCOPY:    return HcpyPlot(hwnd);
-        case ID_HARDCOPY_BW: return HcpyPlotBW(hwnd);
+        case ID_HARDCOPY_PS:    return HcpyPlotPS(hwnd);
+        case ID_HARDCOPY_PS_BW: return HcpyPlotPSBW(hwnd);
+        case ID_HARDCOPY_SVG:    return HcpyPlotSVG(hwnd);
+        case ID_HARDCOPY_SVG_BW: return HcpyPlotSVGBW(hwnd);
         }
     }
     goto WIN_DEFAULT;
@@ -518,6 +590,7 @@ LRESULT CALLBACK PlotWindowProc(HWND hwnd, UINT uMsg,
                         (fye - fy0) / (fxe - fx0), (fxe - fx0) / (fye - fy0));
             }
         }
+        UpdateMainText();
         SetFocus(swString);
     }
     goto WIN_DEFAULT;
@@ -694,13 +767,14 @@ int WIN_NewViewport(GRAPH *graph)
                           0, 0, WinLineWidth, i * 2 - 22, NULL, NULL, hInst, NULL);
 #else
    /* UTF-8 support */
-    const int n_byte_wide = 2 * (int) strlen(graph->plotname) + 1;
+    const int n_byte_wide = (int) strlen(graph->plotname) + 1;
     wchar_t * const wtext = TMALLOC(wchar_t, n_byte_wide);
-    const int n_byte_wide2 = 2 * (int) strlen(WindowName) + 1;
+    const int n_byte_wide2 = (int) strlen(WindowName) + 1;
     wchar_t * const wtext2 = TMALLOC(wchar_t, n_byte_wide2);
     /* translate UTF-8 to UTF-16 */
     MultiByteToWideChar(CP_UTF8, 0, graph->plotname, -1, wtext, n_byte_wide);
     MultiByteToWideChar(CP_UTF8, 0, WindowName, -1, wtext2, n_byte_wide2);
+    /* CreateWindowW requires NULL-terminated wtext */
     window = CreateWindowW(wtext2, wtext, WS_OVERLAPPEDWINDOW,
         0, 0, WinLineWidth, i * 2 - 22, NULL, NULL, hInst, NULL);
     txfree(wtext);
@@ -740,8 +814,10 @@ int WIN_NewViewport(GRAPH *graph)
     AppendMenu(sysmenu, MF_SEPARATOR, 0, NULL);
     AppendMenu(sysmenu, MF_STRING, ID_DRUCKEN,   STR_DRUCKEN);
     AppendMenu(sysmenu, MF_STRING, ID_DRUCKEINR, STR_DRUCKEINR);
-    AppendMenu(sysmenu, MF_STRING, ID_HARDCOPY, STR_HARDCOPY);
-    AppendMenu(sysmenu, MF_STRING, ID_HARDCOPY_BW, STR_HARDCOPY_BW);
+    AppendMenu(sysmenu, MF_STRING, ID_HARDCOPY_PS, STR_HARDCOPY_PS);
+//    AppendMenu(sysmenu, MF_STRING, ID_HARDCOPY_PS_BW, STR_HARDCOPY_PS_BW);
+    AppendMenu(sysmenu, MF_STRING, ID_HARDCOPY_SVG, STR_HARDCOPY_SVG);
+//    AppendMenu(sysmenu, MF_STRING, ID_HARDCOPY_SVG_BW, STR_HARDCOPY_SVG_BW);
 
     /* set default parameters of DC */
     SetBkColor(dc, graph->colorarray[0]);
@@ -1010,21 +1086,38 @@ int WIN_Text(const char *text, int x, int y, int angle)
     lfw.lfEscapement = angle * 10;
     lfw.lfOrientation = angle * 10;
     lfw.lfWeight = 500;
-    lfw.lfItalic = 0;
+    lfw.lfItalic = FALSE;
     lfw.lfUnderline = 0;
     lfw.lfStrikeOut = 0;
-    lfw.lfCharSet = 0;
+    lfw.lfCharSet = DEFAULT_CHARSET;
     lfw.lfOutPrecision = 0;
     lfw.lfClipPrecision = 0;
     lfw.lfQuality = 0;
     lfw.lfPitchAndFamily = 0;
 
     /* set up fonts */
-    if (!cp_getvar("wfont", CP_STRING, facename, sizeof(facename))) {
+    if (!cp_getvar("wfont", CP_STRING, facename, sizeof(facename) - 1)) {
         (void)lstrcpyW(lfw.lfFaceName, DEFW_FONTW);
     }
     else {
+        /* Read a font name (see https://docs.microsoft.com/en-us/typography/fonts/windows_10_font_list) 
+           Set lfw if Bold or Italic is found, remove both from facename, remove trailing spaces */
         wchar_t wface[32];
+        char* tmpstr = strstr(facename, "Bold");
+        if (tmpstr) {
+            lfw.lfWeight = 700;
+            memcpy(tmpstr, "    ", 4);
+        }
+        char* tmpstr2 = strstr(facename, "Italic");
+        if (tmpstr2) {
+            lfw.lfItalic = TRUE;
+            memcpy(tmpstr2, "      ", 6);
+        }
+        /* remove trailing spaces */
+        if (tmpstr || tmpstr2) {
+            char* const f_end = skip_back_ws(facename + strlen(facename), facename);
+            *f_end = '\0';
+        }
         swprintf(wface, 32, L"%S", facename);
         (void)lstrcpyW(lfw.lfFaceName, wface);
     }
@@ -1044,8 +1137,9 @@ int WIN_Text(const char *text, int x, int y, int angle)
 #ifdef EXT_ASC
     TextOut(wd->hDC, x, wd->Area.bottom - y - currentgraph->fontheight, text, (int)strlen(text));
 #else
-    const int n_byte_wide = 2 * (int) strlen(text) + 1;
+    const int n_byte_wide = (int) strlen(text);
     wchar_t * const wtext = TMALLOC(wchar_t, n_byte_wide);
+    /* wtext needs not to be NULL-terminated */
     MultiByteToWideChar(CP_UTF8, 0, text, -1, wtext, n_byte_wide);
     TextOutW(wd->hDC, x, wd->Area.bottom - y - currentgraph->fontheight,
             wtext, n_byte_wide);

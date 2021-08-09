@@ -153,6 +153,7 @@ static bool cont_condition;
 #include "frontend/com_measure2.h"
 #include "frontend/misccoms.h"
 #include "ngspice/stringskip.h"
+#include "frontend/variable.h"
 
 #ifdef HAVE_FTIME
 #include <sys/timeb.h>
@@ -377,8 +378,8 @@ static bool nobgtrwanted = FALSE;
 static bool wantvdat = FALSE;
 static bool wantidat = FALSE;
 static bool wantsync = FALSE;
-static bool immediate = FALSE;
-static bool coquit = FALSE;
+static NG_BOOL immediate = FALSE;
+static NG_BOOL coquit = FALSE;
 static jmp_buf errbufm, errbufc;
 static int intermj = 1;
 #ifdef XSPICE
@@ -387,7 +388,6 @@ static SendEvtData* sendevt;
 #endif
 static void* euserptr;
 static wordlist *shcontrols;
-
 
 // thread IDs
 unsigned int main_id, ng_id, command_id;
@@ -452,7 +452,7 @@ SIMinit(IFfrontEnd* frontEnd, IFsimulator** simulator)
 static threadId_t tid, printtid, tid2;
 
 static bool fl_running = FALSE;
-static bool fl_exited = TRUE;
+static NG_BOOL fl_exited = TRUE;
 
 static bool printstopp = FALSE;
 static bool ps_exited = TRUE;
@@ -776,7 +776,7 @@ read_initialisation_file(const char *dir, const char *name)
 
 /* Checks if ngspice is running in the background */
 IMPEXP
-bool
+NG_BOOL
 ngSpice_running (void)
 {
     return (fl_running && !fl_exited);
@@ -821,6 +821,8 @@ ngSpice_Init(SendChar* printfcn, SendStat* statusfcn, ControlledExit* ngspiceexi
              SendData* sdata, SendInitData* sinitdata, BGThreadRunning* bgtrun, void* userData)
 {
     sighandler old_sigsegv = NULL;
+
+    struct variable* sourcepathvar;
 
     pfcn = printfcn;
     /* if caller sends NULL, don't send printf strings */
@@ -997,6 +999,11 @@ ngSpice_Init(SendChar* printfcn, SendStat* statusfcn, ControlledExit* ngspiceexi
 
     if(!myvec)
         myvec = TMALLOC(vector_info, sizeof(vector_info));
+
+    /* Read first entry of sourcepath var, set Infile_path for code models */
+    if ( cp_getvar("sourcepath", CP_LIST, &sourcepathvar, 0)) {
+        Infile_Path = copy(sourcepathvar->va_string);
+    }
 
 #if !defined(low_latency)
     /* If caller has sent valid address for pfcn */
@@ -1224,7 +1231,7 @@ static int bkpttmpsize = 0;
 
 /* set a breakpoint in ngspice */
 IMPEXP
-bool ngSpice_SetBkpt(double time)
+NG_BOOL ngSpice_SetBkpt(double time)
 {
     int error;
     CKTcircuit *ckt = NULL;

@@ -65,7 +65,7 @@ Author: 1988 Jeffrey M. Hsu
 typedef struct x11info {
     Window window;
     int isopen;
-    Widget shell, form, view, buttonbox, buttons[2];
+    Widget shell, form, view, buttonbox, buttons[3];
     XFontStruct *font;
     GC gc; /* graphics context for graphs */
     GC gridgc; /* graphics context for grid, linewidth may differ */
@@ -131,6 +131,7 @@ static void resize(Widget w, XtPointer client_data, XEvent *ev, Boolean *continu
 
 //XtCallbackProc
 static void hardcopy(Widget w, XtPointer client_data, XtPointer call_data);
+static void hardcopySVG(Widget w, XtPointer client_data, XtPointer call_data);
 static void killwin(Widget w, XtPointer client_data, XtPointer call_data);
 
 int X11_GetLenStr(GRAPH* gr, char* instring);
@@ -375,13 +376,13 @@ handlekeypressed(Widget w, XtPointer client_data, XEvent *ev, Boolean *continue_
         ret = Xget_str_length("我能吞下", &wl, &wh, NULL, DEVDEP(graph).fname, DEVDEP(graph).fsize);*/
     if (ret == 1) {
         fprintf(cp_err, "Error: Could not establish a font for %s\n", DEVDEP(graph).fname);
-        goto end;
     }
-    XWarpPointer(display, None, DEVDEP(graph).window, 0, 0, 0, 0,
-                 keyev->x + (int)(1.2 * wl),
-                 keyev->y);
+    else {
+        XWarpPointer(display, None, DEVDEP(graph).window, 0, 0, 0, 0,
+            keyev->x + (int)(1.2 * wl),
+            keyev->y);
+    }
 #endif
-end:
     PopGraphContext();
 }
 
@@ -458,13 +459,7 @@ X11_NewViewport(GRAPH *graph)
         { XtNright, (XtArgVal) XtChainRight }
     };
     static Arg buttonargs[ ] = {
-        { XtNlabel, (XtArgVal) NULL },
-        { XtNfromVert, (XtArgVal) NULL },
-        { XtNbottom, (XtArgVal) XtChainTop },
-        { XtNtop, (XtArgVal) XtChainTop },
-        { XtNleft, (XtArgVal) XtRubber },
-        { XtNright, (XtArgVal) XtRubber },
-        { XtNresizable, (XtArgVal) TRUE }
+        { XtNlabel, (XtArgVal) NULL }
     };
     static Arg viewargs[] = {
         { XtNresizable, (XtArgVal) TRUE },
@@ -505,17 +500,22 @@ X11_NewViewport(GRAPH *graph)
         ("buttonbox", boxWidgetClass, DEVDEP(graph).form, bboxargs, XtNumber(bboxargs));
 
     /* set up buttons */
-    XtSetArg(buttonargs[0], XtNlabel, "quit");
+    XtSetArg(buttonargs[0], XtNlabel, "Quit");
     XtSetArg(bboxargs[1], XtNfromVert, NULL);
     DEVDEP(graph).buttons[0] = XtCreateManagedWidget
         ("quit", commandWidgetClass, DEVDEP(graph).buttonbox, buttonargs, 1);
     XtAddCallback(DEVDEP(graph).buttons[0], XtNcallback, killwin, graph);
 
-    XtSetArg(buttonargs[0], XtNlabel, "hardcopy");
+    XtSetArg(buttonargs[0], XtNlabel, "PostScript");
     XtSetArg(bboxargs[1], XtNfromVert, DEVDEP(graph).buttons[0]);
     DEVDEP(graph).buttons[1] = XtCreateManagedWidget
         ("hardcopy", commandWidgetClass, DEVDEP(graph).buttonbox, buttonargs, 1);
     XtAddCallback(DEVDEP(graph).buttons[1], XtNcallback, hardcopy, graph);
+
+    XtSetArg(buttonargs[0], XtNlabel, "SVG");
+    DEVDEP(graph).buttons[2] = XtCreateManagedWidget(
+        "SVG", commandWidgetClass, DEVDEP(graph).buttonbox, buttonargs, 1);
+    XtAddCallback(DEVDEP(graph).buttons[2], XtNcallback, hardcopySVG, graph);
 
     /* set up fonts */
     if (!cp_getvar("xfont", CP_STRING, fontname, sizeof(fontname)))
@@ -726,7 +726,9 @@ X11_Text(const char *text, int x, int y, int angle)
 #ifndef HAVE_LIBXFT
     if (DEVDEP(currentgraph).isopen) {
         if (angle != 0) {
-            fprintf(stderr, " Xft: angles other than 0 are not supported\n");
+            if (ft_ngdebug)
+                fprintf(stderr, "\nWarning: No Xft: angles other than 0 are not supported\n");
+            angle = 0;
         }
         XDrawString(display, DEVDEP(currentgraph).window,
                     DEVDEP(currentgraph).gc, x,
@@ -1066,6 +1068,7 @@ zoomin(GRAPH *graph)
     }
 
     strncpy(buf2, graph->plotname, sizeof(buf2) - 1);
+    buf2[sizeof buf2 - 1] = '\0';
     if ((t = strchr(buf2, ':')) != NULL)
         *t = '\0';
 
@@ -1103,6 +1106,11 @@ hardcopy(Widget w, XtPointer client_data, XtPointer call_data)
     NG_IGNORE(call_data);
     NG_IGNORE(w);
 
+    int i = 1;
+    cp_vset("hcopydevtype", CP_STRING, "postscript");
+    /* If not set, the color will be b&w, i = 1 is white background */
+    cp_vset("hcopypscolor", CP_NUM, &i);
+
     /* com_hardcopy() -> gr_resize() -> setcolor() during postscript
        printing will act on currentgraph with a DEVDEP inherited from PSdevdep.
        But currentgraph had not changed its devdep, which was derived from
@@ -1124,6 +1132,26 @@ hardcopy(Widget w, XtPointer client_data, XtPointer call_data)
         com_hardcopy(NULL);
         currentgraph->devdep = devdep;
     } else {
+        com_hardcopy(NULL);
+    }
+}
+
+static void
+hardcopySVG(Widget w, XtPointer client_data, XtPointer call_data)
+{
+    NG_IGNORE(call_data);
+    NG_IGNORE(w);
+
+    lasthardcopy = (GRAPH*)client_data;
+
+    cp_vset("hcopydevtype", CP_STRING, "svg");
+
+    if (currentgraph) {
+        void* devdep = currentgraph->devdep;
+        com_hardcopy(NULL);
+        currentgraph->devdep = devdep;
+    }
+    else {
         com_hardcopy(NULL);
     }
 }

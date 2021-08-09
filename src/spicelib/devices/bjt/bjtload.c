@@ -321,8 +321,6 @@ BJTload(GENmodel *inModel, CKTcircuit *ckt)
                             *(ckt->CKTstate1 + here->BJTgx);
                     *(ckt->CKTstate0 + here->BJTvsub) =
                             *(ckt->CKTstate1 + here->BJTvsub);
-                    vsub = (1+xfact)**(ckt->CKTstate1 + here->BJTvsub)-
-                            xfact* *(ckt->CKTstate2 + here->BJTvsub);
                     *(ckt->CKTstate0 + here->BJTirci) =
                             *(ckt->CKTstate1 + here->BJTirci);
                     *(ckt->CKTstate0 + here->BJTirci_Vrci) =
@@ -348,9 +346,6 @@ BJTload(GENmodel *inModel, CKTcircuit *ckt)
                     vrci=model->BJTtype*(
                         *(ckt->CKTrhsOld+here->BJTcollCXNode)-
                         *(ckt->CKTrhsOld+here->BJTcolPrimeNode));
-                    vsub=model->BJTtype*model->BJTsubs*(
-                        *(ckt->CKTrhsOld+here->BJTsubstNode)-
-                        *(ckt->CKTrhsOld+here->BJTsubstConNode));
 #ifndef PREDICTOR
                 }
 #endif /* PREDICTOR */
@@ -439,8 +434,13 @@ BJTload(GENmodel *inModel, CKTcircuit *ckt)
                 vbc = DEVpnjlim(vbc,*(ckt->CKTstate0 + here->BJTvbc),vt,
                         here->BJTtVcrit,&ichk1);
                 if (ichk1 == 1) icheck=1;
-                vsub = DEVpnjlim(vsub,*(ckt->CKTstate0 + here->BJTvsub),vt,
-                        here->BJTtSubVcrit,&ichk1);
+                if (model->BJTsubSatCurGiven) {
+                    vsub = DEVpnjlim(vsub,*(ckt->CKTstate0 + here->BJTvsub),vt,
+                            here->BJTtSubVcrit,&ichk1);
+                } else {
+                    vsub = DEVpnjlim(vsub,*(ckt->CKTstate0 + here->BJTvsub),vt,
+                            50,&ichk1);
+                }
                 if (ichk1 == 1) icheck=1;
                 vrci = vbc - vbcx; /* in case vbc was limited */
             }
@@ -507,28 +507,31 @@ next1:      vtn=vt*here->BJTtemissionCoeffF;
             gbcn+=ckt->CKTgmin;
             cbcn+=ckt->CKTgmin*vbc;
 
-            vts=vt*here->BJTtemissionCoeffS;
-
-            if(vsub <= -3*vts) {
-                arg=3*vts/(vsub*CONSTe);
-                arg = arg * arg * arg;
-                gdsub = csubsat*3*arg/vsub+ckt->CKTgmin;
-                cdsub = -csubsat*(1+arg)+ckt->CKTgmin*vsub;
+            if (model->BJTsubSatCurGiven) {
+                vts=vt*here->BJTtemissionCoeffS;
+                if(vsub <= -3*vts) {
+                    arg=3*vts/(vsub*CONSTe);
+                    arg = arg * arg * arg;
+                    gdsub = csubsat*3*arg/vsub+ckt->CKTgmin;
+                    cdsub = -csubsat*(1+arg)+ckt->CKTgmin*vsub;
+                } else {
+                    evsub = exp(MIN(MAX_EXP_ARG,vsub/vts));
+                    gdsub = csubsat*evsub/vts + ckt->CKTgmin;
+                    cdsub = csubsat*(evsub-1) + ckt->CKTgmin*vsub;
+                }
             } else {
-                evsub = exp(MIN(MAX_EXP_ARG,vsub/vts));
-                gdsub = csubsat*evsub/vts + ckt->CKTgmin;
-                cdsub = csubsat*(evsub-1) + ckt->CKTgmin*vsub;
+                gdsub = ckt->CKTgmin;
+                cdsub = ckt->CKTgmin*vsub;
             }
-
             /*
              *   Kull's Quasi-Saturation model
              */
             if (model->BJTintCollResistGiven) {
-                double Kbci,Kbci_Vbci,Kbcx,Kbcx_Vbcx;
-                double rKp1,rKp1_Vbci,rKp1_Vbcx,xvar1,xvar1_Vbci,xvar1_Vbcx;
-                double Vcorr,Vcorr_Vbci,Vcorr_Vbcx,Iohm,Iohm_Vrci,Iohm_Vbci,Iohm_Vbcx;
-                double quot,quot_Vrci;
                 if (vrci > 0.) {
+                    double Kbci,Kbci_Vbci,Kbcx,Kbcx_Vbcx;
+                    double rKp1,rKp1_Vbci,rKp1_Vbcx,xvar1,xvar1_Vbci,xvar1_Vbcx;
+                    double Vcorr,Vcorr_Vbci,Vcorr_Vbcx,Iohm,Iohm_Vrci,Iohm_Vbci,Iohm_Vbcx;
+                    double quot,quot_Vrci;
                     Kbci = sqrt(1+here->BJTtepiDoping*exp(vbc/vt));
                     Kbci_Vbci = here->BJTtepiDoping*exp(vbc/vt)/(2*vt*Kbci);
                     Kbcx = sqrt(1+here->BJTtepiDoping*exp(vbcx/vt));

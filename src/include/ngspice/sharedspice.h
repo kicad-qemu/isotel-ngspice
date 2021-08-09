@@ -1,5 +1,5 @@
 /* header file for shared ngspice */
-/* Copyright 2013 Holger Vogt */
+/* Copyright 2021 Holger Vogt */
 /* Modified BSD license */
 
 /*
@@ -86,10 +86,17 @@ Memory allocated in the calling program has to be freed only there.
 ngspice.dll should never call exit() directly, but handle either the 'quit'
 request to the caller or an request for exiting upon error,
 done by callback function ngexit().
+
+All boolean signals (NG_BOOL) are of type _Bool, if ngspice is compiled. They
+are of type bool if sharedspice.h is used externally.
 */
 
 #ifndef NGSPICE_PACKAGE_VERSION
-#define NGSPICE_PACKAGE_VERSION "34+"
+#define NGSPICE_PACKAGE_VERSION "35"
+#endif
+/* we have NG_BOOL instead of BOOL */
+#ifndef HAS_NG_BOOL
+#define HAS_NG_BOOL 1
 #endif
 
 #ifndef NGSPICE_DLL_H
@@ -128,6 +135,16 @@ struct ngcomplex {
 typedef struct ngcomplex ngcomplex_t;
 #endif
 
+/* NG_BOOL is the boolean variable at the ngspice interface.
+   When ompiling ngspice shared module, typedef to _BOOL, which is boolean in C,
+   when used externally, keep it to be of type bool,
+   as has been available in the past. */
+#ifndef SHARED_MODULE
+typedef bool NG_BOOL;
+#else
+typedef _Bool NG_BOOL;
+#endif
+
 /* vector info obtained from any vector in ngspice.dll.
    Allows direct access to the ngspice internal vector structure,
    as defined in include/ngspice/devc.h . */
@@ -144,8 +161,8 @@ typedef struct vecvalues {
     char* name;        /* name of a specific vector */
     double creal;      /* actual data value */
     double cimag;      /* actual data value */
-    bool is_scale;     /* if 'name' is the scale vector */
-    bool is_complex;   /* if the data are complex numbers */
+    NG_BOOL is_scale;     /* if 'name' is the scale vector */
+    NG_BOOL is_complex;   /* if the data are complex numbers */
 } vecvalues, *pvecvalues;
 
 typedef struct vecvaluesall {
@@ -159,7 +176,7 @@ typedef struct vecinfo
 {
     int number;     /* number of vector, as postion in the linked list of vectors, starts with 0 */
     char *vecname;  /* name of the actual vector */
-    bool is_real;   /* TRUE if the actual vector has real data */
+    NG_BOOL is_real;   /* TRUE if the actual vector has real data */
     void *pdvec;    /* a void pointer to struct dvec *d, the actual vector */
     void *pdvecscale; /* a void pointer to struct dvec *ds, the scale vector */
 } vecinfo, *pvecinfo;
@@ -216,11 +233,11 @@ typedef int (SendStat)(char*, int, void*);
    void* return pointer received from caller
 */
 /* asking for controlled exit */
-typedef int (ControlledExit)(int, bool, bool, int, void*);
+typedef int (ControlledExit)(int, NG_BOOL, NG_BOOL, int, void*);
 /*
    int   exit status
-   bool  if true: immediate unloading dll, if false: just set flag, unload is done when function has returned
-   bool  if true: exit upon 'quit', if false: exit due to ngspice.dll error
+   NG_BOOL  if true: immediate unloading dll, if false: just set flag, unload is done when function has returned
+   NG_BOOL  if true: exit upon 'quit', if false: exit due to ngspice.dll error
    int   identification number of calling ngspice shared lib
    void* return pointer received from caller
 */
@@ -242,9 +259,9 @@ typedef int (SendInitData)(pvecinfoall, int, void*);
 */
 
 /* indicate if background thread is running */
-typedef int (BGThreadRunning)(bool, int, void*);
+typedef int (BGThreadRunning)(NG_BOOL, int, void*);
 /*
-   bool        true if background thread is running
+   NG_BOOL        true if background thread is running
    int         identification number of calling ngspice shared lib
    void*       return pointer received from caller
 */
@@ -399,11 +416,11 @@ char** ngSpice_AllVecs(char* plotname);
 
 /* returns TRUE if ngspice is running in a second (background) thread */
 IMPEXP
-bool ngSpice_running(void);
+NG_BOOL ngSpice_running(void);
 
 /* set a breakpoint in ngspice */
 IMPEXP
-bool ngSpice_SetBkpt(double time);
+NG_BOOL ngSpice_SetBkpt(double time);
 
 
 #ifdef __cplusplus

@@ -183,13 +183,13 @@ int PS_Init(void)
 
     /* get linewidth information from spinit */
     if (!cp_getvar("xbrushwidth", CP_REAL, &linewidth, 0))
-        linewidth = 0;
+        linewidth = 1;
     if (linewidth < 0)
         linewidth = 0;
 
     /* get linewidth for grid from spinit */
     if (!cp_getvar("xgridwidth", CP_REAL, &gridlinewidth, 0))
-        gridlinewidth = linewidth;
+        gridlinewidth = 1;
     if (gridlinewidth < 0)
         gridlinewidth = 0;
 
@@ -305,6 +305,7 @@ int PS_NewViewport(GRAPH *graph)
     /* set up a reasonable font */
     fprintf(plotfile, "/%sLatin1 findfont %d scalefont setfont\n\n",
             psfont, (int) (fontsize * scale));
+    tfree(graph->devdep);
     graph->devdep = TMALLOC(PSdevdep, 1);
     graph->n_byte_devdep = sizeof(PSdevdep);
     DEVDEP(graph).lastlinestyle = -1;
@@ -489,6 +490,11 @@ int PS_Update(void)
     return 0;
 }
 
+int PS_Finalize(void)
+{
+    fprintf(plotfile, "stroke\n");
+    return 0;
+}
 
 /**************** PRIVAT FUNCTIONS OF PS FRONTEND *****************************/
 

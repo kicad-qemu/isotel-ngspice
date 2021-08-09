@@ -17,9 +17,12 @@ Modified: 2001 AlansFixes
 
 #include <stdlib.h>
 
-#ifdef HAS_WINGUI
+#if defined(_MSC_VER) || defined(__MINGW32__)
 #undef BOOLEAN
 #include <windows.h>
+#endif
+
+#ifdef HAS_WINGUI
 typedef struct {      /* Extra window data */
     HWND  wnd;        /* window */
     HDC   hDC;        /* Device context of window */
@@ -131,7 +134,6 @@ gr_fixgrid(GRAPH *graph, double xdelta, double ydelta, int xtype, int ytype)
 void
 gr_redrawgrid(GRAPH *graph)
 {
-
     SetColor(1);
     SetLinestyle(1);
     /* draw labels */
@@ -142,6 +144,12 @@ gr_redrawgrid(GRAPH *graph)
             graph->fontheight, 0);
 #else
         if (eq(dispdev->name, "postscript"))
+        {
+            DevDrawText(graph->grid.xlabel,
+                (int)(graph->absolute.width * 0.35),
+                graph->fontheight, 0);
+        }
+        else if (eq(dispdev->name, "svg"))
         {
             DevDrawText(graph->grid.xlabel,
                 (int)(graph->absolute.width * 0.35),
@@ -232,6 +240,41 @@ gr_redrawgrid(GRAPH *graph)
                                 graph->grid.ylabel) * graph->fontwidth) / 2,
                         90);
             }
+#if !defined(_MSC_VER ) && !defined(__MINGW32__)
+            /* svg for non-Windows */
+            else if (eq(dispdev->name, "svg")) {
+                DevDrawText(graph->grid.ylabel,
+                        2 * graph->fontwidth,
+                        /* vertical text, midpoint in y is aligned midpoint
+                         * of text string */
+                        (graph->absolute.height - (int)strlen(graph->grid.ylabel) * graph->fontwidth) / 2,
+                        90);
+            }
+#else
+            /* Windows and UTF-8: check for string length (in pixels),
+               place vertical text centered in y with respect to grid */
+            else if (eq(dispdev->name, "svg")) {
+                /* utf-8: figure out the real length of the y label */
+                const int n_byte_wide = 2 * (int)strlen(graph->grid.ylabel) + 1;
+                wchar_t* const wtext = TMALLOC(wchar_t, n_byte_wide);
+                int wlen = MultiByteToWideChar(CP_UTF8, 0, graph->grid.ylabel, -1,
+                    wtext, n_byte_wide);
+                if (wlen == 0) {
+                    fprintf(stderr, "UTF-8 to wide char conversion failed with 0x%x\n", GetLastError());
+                    fprintf(stderr, "%s could not be converted\n", graph->grid.ylabel);
+                }
+                else {
+                    int textlen = graph->fontwidth * wlen;
+
+                    DevDrawText(graph->grid.ylabel,
+                        (int)(2 * graph->fontwidth),
+                        //vertical text, midpoint in y is aligned midpoint of text string
+                        (graph->absolute.height - (int)(1.2 * textlen)) / 2, 90);
+                }
+                txfree(wtext);
+    }
+#endif
+
 #ifdef EXT_ASC
             else if (eq(dispdev->name, "Windows"))
                 DevDrawText(graph->grid.ylabel,
@@ -288,7 +331,7 @@ gr_redrawgrid(GRAPH *graph)
     }
 
     /* draw postscript title */
-    if (graph->plotname && eq(dispdev->name, "postscript"))
+    if (graph->plotname && (eq(dispdev->name, "postscript") || eq(dispdev->name, "svg")))
             DevDrawText(graph->plotname,
                         graph->fontwidth,
                         graph->absolute.height - graph->fontheight, 0);
@@ -694,11 +737,13 @@ drawlingrid(GRAPH *graph, char *units, int spacing, int nsp, double dst, double 
         if (nsp == 1)
             j += 1000;
     }
-    if (axis == x_axis)
-        DevDrawText(units, (int) (graph->absolute.width * RELPOSXUNIT + unitshift), graph->fontheight, 0);
-    else
-        DevDrawText(units, graph->fontwidth,
-                    (int) (graph->absolute.height - 2 * graph->fontheight), 0);
+    if (!graph->nounits) {
+        if (axis == x_axis)
+            DevDrawText(units, (int)(graph->absolute.width * RELPOSXUNIT + unitshift), graph->fontheight, 0);
+        else
+            DevDrawText(units, graph->fontwidth,
+                (int)(graph->absolute.height - 2 * graph->fontheight), 0);
+    }
     DevUpdate();
 }
 
@@ -900,12 +945,14 @@ drawloggrid(GRAPH *graph, char *units, int hmt, int lmt, int decsp, int subs, in
         }
     }
 
-    if (axis == x_axis)
-        DevDrawText(units, (int) (graph->absolute.width * RELPOSXUNIT + unitshift),
-                    graph->fontheight, 0);
-    else
-        DevDrawText(units, graph->fontwidth,
-                    (int) (graph->absolute.height - 2 * graph->fontheight), 0);
+    if (!graph->nounits) {
+        if (axis == x_axis)
+            DevDrawText(units, (int)(graph->absolute.width * RELPOSXUNIT + unitshift),
+                +graph->fontheight, 0);
+        else
+            DevDrawText(units, graph->fontwidth,
+                (int)(graph->absolute.height - 2 * graph->fontheight), 0);
+    }
 
     DevUpdate();
 }

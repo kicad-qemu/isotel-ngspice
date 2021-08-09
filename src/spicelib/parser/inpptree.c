@@ -5,6 +5,7 @@ Author: 1987 Wayne A. Christopher, U. C. Berkeley CAD Group
 //#define TRACE
 
 #include "ngspice/ngspice.h"
+#include "ngspice/compatmode.h"
 #include "ngspice/ifsim.h"
 #include "ngspice/iferrmsg.h"
 #include "ngspice/inpdefs.h"
@@ -22,7 +23,7 @@ static INPparseNode *mkcon(double value);
 static INPparseNode *mkb(int type, INPparseNode * left,
                          INPparseNode * right);
 static INPparseNode *mkf(int type, INPparseNode * arg);
-static int PTcheck(INPparseNode * p);
+static int PTcheck(INPparseNode * p, char* tline);
 static INPparseNode *mkvnode(char *name);
 static INPparseNode *mkinode(char *name);
 
@@ -194,6 +195,7 @@ INPgetTree(char **line, INPparseTree ** pt, CKTcircuit *ckt, INPtables * tab)
 {
     INPparseNode *p = NULL;
     int i, rv;
+    char* treeline = *line;
 
     values = NULL;
     types = NULL;
@@ -208,7 +210,7 @@ INPgetTree(char **line, INPparseTree ** pt, CKTcircuit *ckt, INPtables * tab)
 
     rv = PTparse(line, &p, ckt);
 
-    if (rv || !p || !PTcheck(p)) {
+    if (rv || !p || !PTcheck(p, treeline)) {
 
         *pt = NULL;
         release_tree(p);
@@ -448,11 +450,16 @@ static INPparseNode *PTdifferentiate(INPparseNode * p, int varnum)
             break;
 
         case PTF_EXP:                /* u > EXPARGMAX -> EXPMAX, that is exp(EXPARGMAX), else exp(u) */
-            arg1 = mkb(PT_TERN,
-                mkf(PTF_GT0, mkb(PT_MINUS, p->left, mkcon(EXPARGMAX))),
-                mkb(PT_COMMA,
-                    mkcon(EXPMAX),
-                    mkf(PTF_EXP, p->left)));
+            if (newcompat.ps) {
+                arg1 = mkb(PT_TERN,
+                    mkf(PTF_GT0, mkb(PT_MINUS, p->left, mkcon(EXPARGMAX))),
+                    mkb(PT_COMMA,
+                        mkcon(EXPMAX),
+                        mkf(PTF_EXP, p->left)));
+            }
+            else {                   /* exp(u) */
+                arg1 = mkf(PTF_EXP, p->left);
+            }
 
 #ifdef TRACE1
             printf("debug exp, %s, returns; ", __func__);
@@ -892,10 +899,13 @@ static INPparseNode *mkf(int type, INPparseNode * arg)
     return (p);
 }
 
-/* Check for remaining PT_PLACEHOLDERs in the parse tree.  Returns 1 if ok. */
+/* Check for remaining PT_PLACEHOLDERs in the parse tree.  Returns 1 if ok. 
+   Returns 0 and error message containing expression to parsed, if not ok. */
 
-static int PTcheck(INPparseNode * p)
+static int PTcheck(INPparseNode * p, char *tline)
 {
+    int ret;
+    static bool msgsent = FALSE;
     switch (p->type) {
     case PT_PLACEHOLDER:
         return (0);
@@ -908,7 +918,12 @@ static int PTcheck(INPparseNode * p)
         return (1);
 
     case PT_FUNCTION:
-        return (PTcheck(p->left));
+        ret = (PTcheck(p->left, tline));
+        if (ret == 0 && !msgsent) {
+            fprintf(stderr, "\nError: The internal check of parse tree \n%s\nfailed\n", tline);
+            msgsent = TRUE;
+        }
+        return ret;
 
     case PT_PLUS:
     case PT_MINUS:
@@ -916,9 +931,19 @@ static int PTcheck(INPparseNode * p)
     case PT_DIVIDE:
     case PT_POWER:
     case PT_COMMA:
-        return (PTcheck(p->left) && PTcheck(p->right));
+        ret = (PTcheck(p->left, tline) && PTcheck(p->right, tline));
+        if (ret == 0 && !msgsent) {
+            fprintf(stderr, "\nError: The internal check of parse tree \n%s\nfailed\n", tline);
+            msgsent = TRUE;
+        }
+        return ret;
     case PT_TERN:
-        return (PTcheck(p->left) && PTcheck(p->right->left) && PTcheck(p->right->right));
+        ret = (PTcheck(p->left, tline) && PTcheck(p->right->left, tline) && PTcheck(p->right->right, tline));
+        if (ret == 0 && !msgsent) {
+            fprintf(stderr, "\nError: The internal check of parse tree \n%s\nfailed\n", tline);
+            msgsent = TRUE;
+        }
+        return ret;
 
     default:
         fprintf(stderr, "Internal error: bad node type %d\n", p->type);

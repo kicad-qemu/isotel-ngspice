@@ -217,6 +217,48 @@ DIOmParam(int param, IFvalue *value, GENmodel *inModel)
             model->DIOrecEmissionCoeff = value->rValue;
             model->DIOrecEmissionCoeffGiven = TRUE;
             break;
+        case  DIO_MOD_RTH0:
+            model->DIOrth0 = value->rValue;
+            model->DIOrth0Given = TRUE;
+            break;
+        case  DIO_MOD_CTH0:
+            model->DIOcth0 = value->rValue;
+            model->DIOcth0Given = TRUE;
+            break;
+
+        case DIO_MOD_LM:
+            model->DIOlengthMetal = value->rValue;
+            model->DIOlengthMetalGiven = TRUE;
+            break;
+        case DIO_MOD_LP:
+            model->DIOlengthPoly = value->rValue;
+            model->DIOlengthPolyGiven = TRUE;
+            break;
+        case DIO_MOD_WM:
+            model->DIOwidthMetal = value->rValue;
+            model->DIOwidthMetalGiven = TRUE;
+            break;
+        case DIO_MOD_WP:
+            model->DIOwidthPoly = value->rValue;
+            model->DIOwidthPolyGiven = TRUE;
+            break;
+        case DIO_MOD_XOM:
+            model->DIOmetalOxideThick = value->rValue * 1e-10; /* m */
+            model->DIOmetalOxideThickGiven = TRUE;
+            break;
+        case DIO_MOD_XOI:
+            model->DIOpolyOxideThick = value->rValue * 1e-10; /* m */
+            model->DIOpolyOxideThickGiven = TRUE;
+            break;
+        case DIO_MOD_XM:
+            model->DIOmetalMaskOffset = value->rValue;
+            model->DIOmetalMaskOffsetGiven = TRUE;
+            break;
+        case DIO_MOD_XP:
+            model->DIOpolyMaskOffset = value->rValue;
+            model->DIOpolyMaskOffsetGiven = TRUE;
+            break;
+
         case DIO_MOD_D:
             /* no action - we already know we are a diode, but this */
             /* makes life easier for spice-2 like parsers */

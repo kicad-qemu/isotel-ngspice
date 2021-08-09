@@ -72,12 +72,13 @@ static void rem_unused_mos_models(struct card* deck);
 //void inp_mc_free(void);
 //void inp_remove_recent(void);
 static bool mc_reload = FALSE;
-void eval_seed_opt(struct card *deck);
+void eval_opt(struct card *deck);
 
 extern bool ft_batchmode;
 
 /* from inpcom.c */
 extern struct nscope* inp_add_levels(struct card *deck);
+extern void inp_rem_levels(struct nscope* root);
 extern void comment_out_unused_subckt_models(struct card *deck);
 extern void inp_rem_unused_models(struct nscope *root, struct card *deck);
 
@@ -394,49 +395,66 @@ inp_remove_recent(void) {
         line_free(recent_deck, TRUE);
 }
 
-/* check for .option seed=[val|random] and set the random number generator */
+
+/* Check for .option seed=[val|random] and set the random number generator.
+   Check for .option cshunt=val and set a global variable
+   Input is the option deck (already sorted for .option) */
 void
-eval_seed_opt(struct card *deck)
+eval_opt(struct card* deck)
 {
-    struct card *card;
+    struct card* card;
     bool has_seed = FALSE;
+    bool has_cshunt = FALSE;
 
     for (card = deck; card; card = card->nextcard) {
-        char *line = card->line;
-        if (*line == '*')
-            continue;
-        if (ciprefix(".option", line) || ciprefix("option", line)) {
-            /* option seedinfo */
-            if (strstr(line, "seedinfo"))
-                setseedinfo();
-            char *begtok = strstr(line, "seed=");
-            if (begtok)
-                begtok = &begtok[5]; /*skip seed=*/
-            if (begtok) {
-                if (has_seed)
-                    fprintf(cp_err, "Warning: Multiple 'option seed=val|random' found!\n");
-                char *token = gettok(&begtok);
-                /* option seed=random [seed='random'] */
-                if (eq(token, "random") || eq(token, "{random}")) {
-                    time_t acttime = time(NULL);
-                    /* get random value from time in seconds since 1.1.1970 */
-                    int rseed = (int)(acttime - 1470000000);
-                    cp_vset("rndseed", CP_NUM, &rseed);
+        char* line = card->line;
+
+        if (strstr(line, "seedinfo"))
+            setseedinfo();
+        char* begtok = strstr(line, "seed=");
+        if (begtok)
+            begtok = &begtok[5]; /*skip seed=*/
+        if (begtok) {
+            if (has_seed)
+                fprintf(cp_err, "Warning: Multiple 'option seed=val|random' found!\n");
+            char* token = gettok(&begtok);
+            /* option seed=random [seed='random'] */
+            if (eq(token, "random") || eq(token, "{random}")) {
+                time_t acttime = time(NULL);
+                /* get random value from time in seconds since 1.1.1970 */
+                int rseed = (int)(acttime - 1600000000);
+                cp_vset("rndseed", CP_NUM, &rseed);
+                com_sseed(NULL);
+                has_seed = TRUE;
+            }
+            /* option seed=val*/
+            else {
+                int sr = atoi(token);
+                if (sr <= 0)
+                    fprintf(cp_err, "Warning: Cannot convert 'option seed=%s' to seed value, skipped!\n", token);
+                else {
+                    cp_vset("rndseed", CP_NUM, &sr);
                     com_sseed(NULL);
                     has_seed = TRUE;
                 }
-                /* option seed=val*/
-                else {
-                    int sr = atoi(token);
-                    if (sr <= 0)
-                        fprintf(cp_err, "Warning: Cannot convert 'option seed=%s' to seed value, skipped!\n", token);
-                    else {
-                        cp_vset("rndseed", CP_NUM, &sr);
-                        com_sseed(NULL);
-                        has_seed = TRUE;
-                    }
-                }
-                tfree(token);
+            }
+            tfree(token);
+        }
+
+        begtok = strstr(line, "cshunt=");
+        if (begtok)
+            begtok = &begtok[7]; /*skip cshunt=*/
+        if (begtok) {
+            int err = 0;
+            if (has_cshunt)
+                fprintf(cp_err, "Warning: Multiple '.option cshunt=val' found!\n");
+            /* option cshunt=val*/
+            double sr = INPevaluate(&begtok, &err, 0);
+            if (sr <= 0 || err)
+                fprintf(cp_err, "Warning: Cannot convert 'option cshunt=%s' to capacitor value, skipped!\n", begtok);
+            else {
+                cp_vset("cshunt_value", CP_REAL, &sr);
+                has_cshunt = TRUE;
             }
         }
     }
@@ -458,8 +476,7 @@ inp_spsource(FILE *fp, bool comfile, char *filename, bool intfile)
 {
     struct card *deck = NULL, *dd, *ld, *prev_param = NULL, *prev_card = NULL;
     struct card *realdeck = NULL, *options = NULL, *curr_meas = NULL;
-    char *tt = NULL, name[BSIZE_SP], *s, *t, *temperature = NULL;
-    double testemp = 0.0;
+    char *tt = NULL, name[BSIZE_SP + 1], *s, *t, *temperature = NULL;
     bool commands = FALSE;
     wordlist *wl = NULL, *end = NULL, *wl_first = NULL;
     wordlist *controls = NULL, *pre_controls = NULL;
@@ -483,8 +500,6 @@ inp_spsource(FILE *fp, bool comfile, char *filename, bool intfile)
     if (fp || intfile) {
         deck = inp_readall(fp, dir_name, comfile, intfile, &expr_w_temper);
 
-        /* here we check for .option seed=[val|random] and set the random number generator */
-        eval_seed_opt(deck);
         /* files starting with *ng_script are user supplied command files */
         if (deck && ciprefix("*ng_script", deck->line))
             comfile = TRUE;
@@ -555,9 +570,11 @@ inp_spsource(FILE *fp, bool comfile, char *filename, bool intfile)
 
     if (!comfile) {
         /* Extract the .option lines from the deck into 'options',
-           and remove them from the deck. */
+           and remove them from the deck. Exceptions are .option with params. */
         options = inp_getopts(deck);
-
+        /* Check for .option seed=[val|random] and set the random number generator.
+           Check for .option cshunt=val and set a global variable cshunt_value */
+        eval_opt(options);
         /* copy a deck before subckt substitution. */
         realdeck = inp_deckcopy(deck);
 
@@ -618,14 +635,6 @@ inp_spsource(FILE *fp, bool comfile, char *filename, bool intfile)
     else {  /* must be regular deck . . . . */
         /* loop through deck and handle control cards */
         for (dd = deck->nextcard; dd; dd = ld->nextcard) {
-            /* get temp from deck */
-            if (ciprefix(".temp", dd->line)) {
-                s = skip_ws(dd->line + 5);
-                if (temperature) {
-                    txfree(temperature);
-                }
-                temperature = copy(s);
-            }
             /* Ignore comment lines, but not lines begining with '*#',
                but remove them, if they are in a .control ... .endc section */
             s = skip_ws(dd->line);
@@ -725,17 +734,6 @@ inp_spsource(FILE *fp, bool comfile, char *filename, bool intfile)
             wl_free(pre_controls);
         }
 
-        /* set temperature if defined to a preliminary variable which may be used
-           in numparam evaluation */
-        if (temperature) {
-            temperature_value = atof(temperature);
-            cp_vset("pretemp", CP_REAL, &temperature_value);
-        }
-        if (ft_ngdebug) {
-            cp_getvar("pretemp", CP_REAL, &testemp, 0);
-            printf("test temperature %f\n", testemp);
-        }
-
         /* We are done handling the control stuff.  Now process remainder of deck.
            Go on if there is something left after the controls.*/
         if (deck->nextcard) {
@@ -761,32 +759,58 @@ inp_spsource(FILE *fp, bool comfile, char *filename, bool intfile)
             if (newcompat.hs || newcompat.spe) {
                 struct card* scan;
                 double dscale = 1;
-                /* from .options */
-                for (scan = options; scan; scan = scan->nextcard) {
-                    char* tmpscale = strstr(scan->line, "scale=");
-                    if (tmpscale) {
-                        int err;
-                        tmpscale = tmpscale + 6;
-                        dscale = INPevaluate(&tmpscale, &err, 1);
-                        if (err == 0)
-                            cp_vset("scale", CP_REAL, &dscale);
-                        else
-                            fprintf(stderr, "\nError: Could not set 'scale' variable\n");
-                        break;
-                    }
-                }
-                /* from options in a .control section */
+                /* from options in a script */
                 for (scan = com_options; scan; scan = scan->nextcard) {
                     char* tmpscale = strstr(scan->line, "scale=");
                     if (tmpscale) {
                         int err;
                         tmpscale = tmpscale + 6;
                         dscale = INPevaluate(&tmpscale, &err, 1);
-                        if (err == 0)
+                        if (err == 0) {
                             cp_vset("scale", CP_REAL, &dscale);
+                            printf("option SCALE: Scale is set to %g for instance and model parameters\n", dscale);
+                        }
                         else
                             fprintf(stderr, "\nError: Could not set 'scale' variable\n");
-                        break;
+                    }
+                    tmpscale = strstr(scan->line, "scalm=");
+                    if (tmpscale) {
+                        int err;
+                        tmpscale = tmpscale + 6;
+                        dscale = INPevaluate(&tmpscale, &err, 1);
+                        if (err == 0) {
+                            cp_vset("scalm", CP_REAL, &dscale);
+                            fprintf(stderr, "Warning: option SCALM is not supported.\n");
+                        }
+                        else
+                            fprintf(stderr, "\nError: Could not set 'scalm' variable\n");
+                    }
+                }
+                /* from .options (will override the previous settings) */
+                for (scan = options; scan; scan = scan->nextcard) {
+                    char* tmpscale = strstr(scan->line, "scale=");
+                    if (tmpscale) {
+                        int err;
+                        tmpscale = tmpscale + 6;
+                        dscale = INPevaluate(&tmpscale, &err, 1);
+                        if (err == 0) {
+                            cp_vset("scale", CP_REAL, &dscale);
+                            printf("option SCALE: Scale is set to %g for instance and model parameters\n", dscale);
+                        }
+                        else
+                            fprintf(stderr, "\nError: Could not set 'scale' variable\n");
+                    }
+                    tmpscale = strstr(scan->line, "scalm=");
+                    if (tmpscale) {
+                        int err;
+                        tmpscale = tmpscale + 6;
+                        dscale = INPevaluate(&tmpscale, &err, 1);
+                        if (err == 0) {
+                            cp_vset("scalm", CP_REAL, &dscale);
+                            fprintf(stderr, "Warning: option SCALM is not supported\n");
+                        }
+                        else
+                            fprintf(stderr, "\nError: Could not set 'scalm' variable\n");
                     }
                 }
             }
@@ -957,6 +981,15 @@ inp_spsource(FILE *fp, bool comfile, char *filename, bool intfile)
                 curr_meas->nextcard = NULL;
                 dd                 = prev_card;
             }
+            /* get temp from deck */
+            if (ciprefix(".temp", dd->line)) {
+                s = skip_ws(dd->line + 5);
+                if (temperature) {
+                    txfree(temperature);
+                }
+                temperature = copy(s);
+                *(dd->line) = '*';
+            }
             prev_card = dd;
         }  //end of for-loop
 
@@ -1093,11 +1126,9 @@ inp_dodeck(
     struct circ *ct;
     struct card *dd;
     CKTcircuit *ckt;
-    char *s;
     INPtables *tab = NULL;
     struct variable *eev = NULL;
-    wordlist *wl;
-    bool noparse, ii;
+    bool noparse;
     int print_listing;
     bool have_err = FALSE;
     int warn;          /* whether SOA check should be performed */
@@ -1128,12 +1159,13 @@ inp_dodeck(
     }
     noparse = cp_getvar("noparse", CP_BOOL, NULL, 0);
 
-
-    /* We check preliminary for the scale option. This special processing
-       is needed because we need the scale info BEFORE building the circuit
-       and seems there is no other way to do this. */
+    /* Read the options, create variables and store them
+       in ftcurckt->ci_vars */
     if (!noparse) {
-        struct card *opt_beg = options;
+        char* s;
+        bool ii;
+        wordlist* wl;
+        struct card* opt_beg = options;
         for (; options; options = options->nextcard) {
             s = skip_non_ws(options->line);
 
@@ -1158,21 +1190,19 @@ inp_dodeck(
             case CP_NUM:
                 break;
             case CP_REAL:
-                if (strcmp("scale", eev->va_name) == 0) {
-                    cp_vset("scale", CP_REAL, &eev->va_real);
-                    printf("Scale set to %g\n", eev->va_real);
-                }
                 break;
             case CP_STRING:
                 break;
             default: {
-                fprintf(stderr, "ERROR: enumeration value `CP_LIST' not handled in inp_dodeck\nAborting...\n");
+                fprintf(stderr, "ERROR: wrong format in option %s!\n", eev->va_name);
+                fprintf(stderr, "   Aborting...\n");
                 controlled_exit(EXIT_FAILURE);
             }
             } /* switch  . . . */
         }
         options = opt_beg; // back to the beginning
     } /* if (!noparse)  . . . */
+
 
     /*----------------------------------------------------
      * Now assuming that we wanna parse this deck, we call
@@ -1626,7 +1656,9 @@ doedit(char *filename)
                 editor = "/usr/bin/vi";
         }
     }
-    sprintf(buf, "%s %s", editor, filename);
+    int len = snprintf(buf, BSIZE_SP - 1, "%s %s", editor, filename);
+    if (len > BSIZE_SP - 1)
+        fprintf(stderr, "Error: the filename is probably tuncated\n");
     return (system(buf) ? FALSE : TRUE);
 }
 
@@ -2378,6 +2410,7 @@ static void rem_unused_mos_models(struct card* deck) {
     struct nscope* root = inp_add_levels(deck);
     comment_out_unused_subckt_models(deck);
     inp_rem_unused_models(root, deck);
+    inp_rem_levels(root);
     /* remove unused binning models */
     for (tmpc = deck; tmpc; tmppc = tmpc, tmpc = tmpc->nextcard) {
         char* curr_line;
@@ -2517,7 +2550,7 @@ static void rem_unused_mos_models(struct card* deck) {
                     wnflag = 0;
             }
 
-            nf = wnflag * wnf > 0.5f ? nf : 1.f;
+            nf = (float)wnflag * wnf > 0.5f ? nf : 1.f;
             w = w / nf;
 
             /* what is the device's model name? */

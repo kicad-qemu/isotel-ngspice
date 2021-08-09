@@ -178,6 +178,38 @@ DIOmAsk (CKTcircuit *ckt, GENmodel *inModel, int which, IFvalue *value)
         case DIO_MOD_NR:
             value->rValue = model->DIOrecEmissionCoeff;
             return(OK);
+        case DIO_MOD_RTH0:
+            value->rValue = model->DIOrth0; 
+            return(OK);
+        case DIO_MOD_CTH0:
+            value->rValue = model->DIOcth0; 
+            return(OK);
+
+        case DIO_MOD_LM:
+            value->rValue = model->DIOlengthMetal;
+            return(OK);
+        case DIO_MOD_LP:
+            value->rValue = model->DIOlengthPoly;
+            return(OK);
+        case DIO_MOD_WM:
+            value->rValue = model->DIOwidthMetal;
+            return(OK);
+        case DIO_MOD_WP:
+            value->rValue = model->DIOwidthPoly;
+            return(OK);
+        case DIO_MOD_XOM:
+            value->rValue = model->DIOmetalOxideThick;
+            return(OK);
+        case DIO_MOD_XOI:
+            value->rValue = model->DIOpolyOxideThick;
+            return(OK);
+        case DIO_MOD_XM:
+            value->rValue = model->DIOmetalMaskOffset;
+            return(OK);
+        case DIO_MOD_XP:
+            value->rValue = model->DIOpolyMaskOffset;
+            return(OK);
+
         default:
             return(E_BADPARM);
         }

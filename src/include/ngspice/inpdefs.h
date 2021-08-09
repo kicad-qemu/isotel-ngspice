@@ -116,6 +116,7 @@ char *INPerrCat(char *, char *);
 char *INPstrCat(char *, char, char *);
 char *INPerror(int);
 double INPevaluate(char **, int *, int);
+double INPevaluateRKM(char **, int *, int);
 char *INPfindLev(char *, int *);
 char *INPgetMod(CKTcircuit *, char *, INPmodel **, INPtables *);
 char *INPgetModBin(CKTcircuit *, char *, INPmodel **, INPtables *, char *);
@@ -136,6 +137,7 @@ void INPpas1(CKTcircuit *, struct card *, INPtables *);
 void INPpas2(CKTcircuit *, struct card *, INPtables *, TSKtask *);
 void INPpas3(
         CKTcircuit *, struct card *, INPtables *, TSKtask *, IFparm *, int);
+void INPpas4(CKTcircuit *, INPtables *);
 int INPpName(char *, IFvalue *, CKTcircuit *, int, GENinstance *);
 int INPtermInsert(CKTcircuit *, char **, INPtables *, CKTnode **);
 int INPtermSearch(CKTcircuit*, char**, INPtables*, CKTnode**);
@@ -149,7 +151,6 @@ char *INPfindVer(char *line, char *version);
 int INPgetStr(char **line, char **token, int gobble);
 int INPgetTitle(CKTcircuit **ckt, struct card **data);
 int INPgetUTok(char **line, char **token, int gobble);
-int INPgetU2Tok(char **line, char **token, int gobble);
 int INPremTerm(char *token, INPtables *tab);
 
 

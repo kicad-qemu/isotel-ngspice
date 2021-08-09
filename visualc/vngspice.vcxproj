@@ -927,6 +927,7 @@
     <ClInclude Include="..\src\frontend\spiceif.h" />
     <ClInclude Include="..\src\frontend\streams.h" />
     <ClInclude Include="..\src\frontend\subckt.h" />
+    <ClInclude Include="..\src\frontend\svg.h" />
     <ClInclude Include="..\src\frontend\terminal.h" />
     <ClInclude Include="..\src\frontend\typesdef.h" />
     <ClInclude Include="..\src\frontend\variable.h" />
@@ -1335,6 +1336,7 @@
     <ClInclude Include="..\src\spicelib\parser\inppas1.h" />
     <ClInclude Include="..\src\spicelib\parser\inppas2.h" />
     <ClInclude Include="..\src\spicelib\parser\inppas3.h" />
+    <ClInclude Include="..\src\spicelib\parser\inppas4.h" />
     <ClInclude Include="..\src\spicelib\parser\inpxx.h" />
     <ClInclude Include="..\src\winmain.h" />
     <ClInclude Include=".\src\include\inttypes.h" />
@@ -1538,6 +1540,7 @@
     <ClCompile Include="..\src\frontend\spiceif.c" />
     <ClCompile Include="..\src\frontend\streams.c" />
     <ClCompile Include="..\src\frontend\subckt.c" />
+    <ClCompile Include="..\src\frontend\svg.c" />
     <ClCompile Include="..\src\frontend\terminal.c" />
     <ClCompile Include="..\src\frontend\trannoise\1-f-code.c" />
     <ClCompile Include="..\src\frontend\trannoise\FastNorm3.c" />
@@ -2653,6 +2656,7 @@
     <ClCompile Include="..\src\spicelib\parser\inppas1.c" />
     <ClCompile Include="..\src\spicelib\parser\inppas2.c" />
     <ClCompile Include="..\src\spicelib\parser\inppas3.c" />
+    <ClCompile Include="..\src\spicelib\parser\inppas4.c" />
     <ClCompile Include="..\src\spicelib\parser\inppname.c" />
     <ClCompile Include="..\src\spicelib\parser\inpptree.c" />
     <ClCompile Include="..\src\spicelib\parser\inpsymt.c" />

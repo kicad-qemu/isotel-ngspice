@@ -38,7 +38,8 @@ typedef struct sDIOinstance {
 
     const int DIOposNode;     /* number of positive node of diode */
     const int DIOnegNode;     /* number of negative node of diode */
-    int DIOposPrimeNode;    /* number of positive prime node of diode */
+    const int DIOtempNode;    /* number of the temperature node of the diode */
+    int DIOposPrimeNode;      /* number of positive prime node of diode */
 
     double *DIOposPosPrimePtr;      /* pointer to sparse matrix at 
                                      * (positive,positive prime) */
@@ -54,6 +55,15 @@ typedef struct sDIOinstance {
                              * (negative,negative) */
     double *DIOposPrimePosPrimePtr; /* pointer to sparse matrix at 
                                      * (positive prime,positive prime) */
+
+    /* self heating */
+    double *DIOtempPosPtr;
+    double *DIOtempPosPrimePtr;
+    double *DIOtempNegPtr;
+    double *DIOtempTempPtr;
+    double *DIOposTempPtr;
+    double *DIOposPrimeTempPtr;
+    double *DIOnegTempPtr;
 
     double DIOcap;   /* stores the diode capacitance */
 
@@ -76,11 +86,22 @@ typedef struct sDIOinstance {
     unsigned DIOtempGiven : 1;  /* flag to indicate temperature was specified */
     unsigned DIOdtempGiven : 1; /* flag to indicate dtemp given */
 
+    unsigned DIOlengthMetalGiven : 1; /* Length of metal capacitor (level=3) */
+    unsigned DIOlengthPolyGiven : 1;  /* Length of polysilicon capacitor (level=3) */
+    unsigned DIOwidthMetalGiven : 1;  /* Width of metal capacitor (level=3) */
+    unsigned DIOwidthPolyGiven : 1;   /* Width of polysilicon capacitor (level=3) */
+
     double DIOarea;     /* area factor for the diode */
     double DIOpj;       /* perimeter for the diode */
     double DIOw;        /* width for the diode */
     double DIOl;        /* length for the diode */
     double DIOm;        /* multiplier for the diode */
+    int    DIOthermal;  /* flag indicate self heating on */
+
+    double DIOlengthMetal;   /* Length of metal capacitor (level=3) */
+    double DIOlengthPoly;    /* Length of polysilicon capacitor (level=3) */
+    double DIOwidthMetal;    /* Width of metal capacitor (level=3) */
+    double DIOwidthPoly;     /* Width of polysilicon capacitor (level=3) */
 
     double DIOinitCond;      /* initial condition */
     double DIOtemp;          /* temperature of the instance */
@@ -91,16 +112,21 @@ typedef struct sDIOinstance {
     double DIOtJctSWCap;     /* temperature adjusted sidewall junction capacitance */
     double DIOtTransitTime;  /* temperature adjusted transit time */
     double DIOtGradingCoeff; /* temperature adjusted grading coefficient (MJ) */
-    double DIOtConductance;  /* temperature adjusted series conductance */
+    double DIOtConductance;    /* temperature adjusted series conductance */
+    double DIOtConductance_dT; /* temperature adjusted series conductance temperature derivative */
 
-    double DIOtDepCap;  /* temperature adjusted transition point in */
-                        /* the curve matching (Fc * Vj ) */
-    double DIOtDepSWCap;  /* temperature adjusted transition point in */
-                          /* the curve matching (Fcs * Vjs ) */
-    double DIOtSatCur;  /* temperature adjusted saturation current */
-    double DIOtSatSWCur;  /* temperature adjusted side wall saturation current */
-    double DIOtTunSatCur;        /* tunneling saturation current */
-    double DIOtTunSatSWCur;      /* sidewall tunneling saturation current */
+    double DIOtDepCap;       /* temperature adjusted transition point in */
+                             /* the curve matching (Fc * Vj ) */
+    double DIOtDepSWCap;     /* temperature adjusted transition point in */
+                             /* the curve matching (Fcs * Vjs ) */
+    double DIOtSatCur;         /* temperature adjusted saturation current */
+    double DIOtSatCur_dT;      /* temperature adjusted saturation current temperature derivative */
+    double DIOtSatSWCur;       /* temperature adjusted side wall saturation current */
+    double DIOtSatSWCur_dT;    /* temperature adjusted side wall saturation current temperature derivative */
+    double DIOtTunSatCur;      /* tunneling saturation current */
+    double DIOtTunSatCur_dT;   /* tunneling saturation current temperature derivative */
+    double DIOtTunSatSWCur;    /* sidewall tunneling saturation current */
+    double DIOtTunSatSWCur_dT; /* sidewall tunneling saturation current temperature derivative */
 
     double DIOtVcrit;   /* temperature adjusted V crit */
     double DIOtF1;      /* temperature adjusted f1 */
@@ -113,9 +139,20 @@ typedef struct sDIOinstance {
 
     double DIOforwardKneeCurrent; /* Forward Knee current */
     double DIOreverseKneeCurrent; /* Reverse Knee current */
-    double DIOjunctionCap;     /* geometry adjusted junction capacitance */
-    double DIOjunctionSWCap;     /* geometry adjusted junction sidewall capacitance */
-    double DIOtRecSatCur; /* temperature adjusted recombination saturation current */
+    double DIOjunctionCap;        /* geometry adjusted junction capacitance */
+    double DIOjunctionSWCap;      /* geometry adjusted junction sidewall capacitance */
+    double DIOtRecSatCur;         /* temperature adjusted recombination saturation current */
+    double DIOtRecSatCur_dT;      /* temperature adjusted recombination saturation current */
+
+    double DIOdIth_dVrs;
+    double DIOdIth_dVdio;
+    double DIOdIth_dT;
+    double DIOgcTt;
+    double DIOdIrs_dT;
+    double DIOdIdio_dT;
+
+    double DIOcmetal; /* parasitic metal overlap capacitance */
+    double DIOcpoly;  /* parasitic polysilicon overlap capacitance */
 
 /*
  * naming convention:
@@ -162,10 +199,16 @@ typedef struct sDIOinstance {
 #define DIOcapCharge DIOstate+3
 #define DIOcapCurrent DIOstate+4
 
-#define DIOnumStates 5
+#define DIOqth DIOstate+5     /* thermal capacitor charge */
+#define DIOcqth DIOstate+6    /* thermal capacitor current */
 
-#define DIOsensxp DIOstate+5    /* charge sensitivities and their derivatives.
-                                 * +6 for the derivatives - pointer to the
+#define DIOdeltemp DIOstate+7 /* thermal voltage over rth0 */
+#define DIOdIdio_dT DIOstate+8
+
+#define DIOnumStates 9
+
+#define DIOsensxp DIOstate+9    /* charge sensitivities and their derivatives.
+                                 * +10 for the derivatives - pointer to the
                                  * beginning of the array */
 
 #define DIOnumSenStates 2
@@ -235,6 +278,18 @@ typedef struct sDIOmodel {       /* model structure for a diode */
     unsigned DIOrecSatCurGiven : 1;
     unsigned DIOrecEmissionCoeffGiven : 1;
 
+    unsigned DIOrth0Given :1;
+    unsigned DIOcth0Given :1;
+
+    unsigned DIOlengthMetalGiven : 1;     /* Length of metal capacitor (level=3) */
+    unsigned DIOlengthPolyGiven : 1;      /* Length of polysilicon capacitor (level=3) */
+    unsigned DIOwidthMetalGiven : 1;      /* Width of metal capacitor (level=3) */
+    unsigned DIOwidthPolyGiven : 1;       /* Width of polysilicon capacitor (level=3) */
+    unsigned DIOmetalOxideThickGiven : 1; /* Thickness of the metal to bulk oxide (level=3) */
+    unsigned DIOpolyOxideThickGiven : 1;  /* Thickness of the polysilicon to bulk oxide (level=3) */
+    unsigned DIOmetalMaskOffsetGiven : 1; /* Masking and etching effects in metal (level=3)") */
+    unsigned DIOpolyMaskOffsetGiven : 1;  /* Masking and etching effects in polysilicon (level=3) */
+
     int    DIOlevel;   /* level selector */
     double DIOsatCur;   /* saturation current */
     double DIOsatSWCur;   /* Sidewall saturation current */
@@ -290,6 +345,18 @@ typedef struct sDIOmodel {       /* model structure for a diode */
     double DIOrecSatCur; /* Recombination saturation current */
     double DIOrecEmissionCoeff; /* Recombination emission coefficient */
 
+    double DIOrth0;
+    double DIOcth0;
+
+    double DIOlengthMetal;     /* Length of metal capacitor (level=3) */
+    double DIOlengthPoly;      /* Length of polysilicon capacitor (level=3) */
+    double DIOwidthMetal;      /* Width of metal capacitor (level=3) */
+    double DIOwidthPoly;       /* Width of polysilicon capacitor (level=3) */
+    double DIOmetalOxideThick; /* Thickness of the metal to bulk oxide (level=3) */
+    double DIOpolyOxideThick;  /* Thickness of the polysilicon to bulk oxide (level=3) */
+    double DIOmetalMaskOffset; /* Masking and etching effects in metal (level=3)") */
+    double DIOpolyMaskOffset;  /* Masking and etching effects in polysilicon (level=3) */
+
 } DIOmodel;
 
 /* device parameters */
@@ -317,6 +384,11 @@ enum {
     DIO_L,
     DIO_M,
     DIO_DTEMP,
+    DIO_THERMAL,
+    DIO_LM,
+    DIO_LP,
+    DIO_WM,
+    DIO_WP,
 };
 
 /* model parameters */
@@ -372,7 +444,20 @@ enum {
     DIO_MOD_BV_MAX,
     DIO_MOD_ISR,
     DIO_MOD_NR,
+    DIO_MOD_RTH0,
+    DIO_MOD_CTH0,
+
+    DIO_MOD_LM,
+    DIO_MOD_LP,
+    DIO_MOD_WM,
+    DIO_MOD_WP,
+    DIO_MOD_XOM,
+    DIO_MOD_XOI,
+    DIO_MOD_XM,
+    DIO_MOD_XP,
 };
+
+void DIOtempUpdate(DIOmodel *inModel, DIOinstance *here, double Temp, CKTcircuit *ckt);
 
 #include "dioext.h"
 #endif /*DIO*/

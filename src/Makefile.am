@@ -592,6 +592,12 @@ libngspice_la_LDFLAGS += -no-undefined
 EXTRA_DIST += ngspice.def
 endif
 
+## if !SHWIN
+## if !SHCYG
+libngspice_la_LDFLAGS += -version-info $(LT_NGSPICE_CURRENT):$(LT_NGSPICE_REVISION):$(LT_LIBNGSPICE_AGE)
+## endif
+## endif
+
 SHAREDSPICE_VERSION = @VERSION@
 
 endif SHARED_MODULE

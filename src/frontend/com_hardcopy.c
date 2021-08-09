@@ -23,7 +23,7 @@
  * it doesn't.  */
 void com_hardcopy(wordlist *wl)
 {
-    char *fname;
+    char *fname = NULL;
     size_t n_byte_fname; /* size of fname in bytes, including null */
     char buf[BSIZE_SP], device[BSIZE_SP];
     bool tempf = FALSE;
@@ -35,26 +35,40 @@ void com_hardcopy(wordlist *wl)
     int hc_button;
     int foundit;
 
+    static int n;
+
     if (!cp_getvar("hcopydev", CP_STRING, device, sizeof(device)))
         *device = '\0';
-
-    if (wl) {
-        hc_button = 0;
-        fname = copy(wl->wl_word);
-        wl = wl->wl_next;
-    }
-    else {
-        hc_button = 1;
-        fname = smktemp("hc");
-        tempf = TRUE;
-    }
-    n_byte_fname = (strlen(fname) + 1) * sizeof *fname;
 
     if (!cp_getvar("hcopydevtype", CP_STRING, buf, sizeof(buf))) {
         devtype = "postscript";
     }
     else {
         devtype = buf;
+    }
+
+    if (wl) {
+        hc_button = 0;
+        fname = copy(wl->wl_word);
+        n_byte_fname = (strlen(fname) + 1) * sizeof *fname;
+        wl = wl->wl_next;
+    }
+    else {
+        hc_button = 1;
+        fname = smktemp2("hc", n);
+        n++;
+        tempf = TRUE;
+        n_byte_fname = (strlen(fname) + 1) * sizeof *fname;
+        if (!strcmp(devtype, "svg")) {
+            fname = trealloc(fname, n_byte_fname + 4);
+            (void)memcpy(fname + n_byte_fname - 1, ".svg", 5);
+            n_byte_fname += 4;
+        }
+        else if (!strcmp(devtype, "postscript")) {
+            fname = trealloc(fname, n_byte_fname + 3);
+            (void)memcpy(fname + n_byte_fname - 1, ".ps", 4);
+            n_byte_fname += 3;
+        }
     }
 
     /* enable screen plot selection for these display types */
@@ -77,19 +91,36 @@ void com_hardcopy(wordlist *wl)
             return;
         }
 
-        /* change .tmp to .ps */
-        psfname = strchr(fname, '.');
-        if (psfname) {
-            psfname[1] = 'p';
-            psfname[2] = 's';
-            psfname[3] = '\0';
+        if (!strcmp(devtype, "svg")) {
+            /* change .tmp to .svg */
+            psfname = strchr(fname, '.');
+            if (psfname) {
+                psfname[1] = 's';
+                psfname[2] = 'v';
+                psfname[3] = 'g';
+                psfname[4] = '\0';
+            }
+            else {
+                fname = trealloc(fname, n_byte_fname + 4);
+                (void)memcpy(fname + n_byte_fname - 1, ".svg", 5);
+                n_byte_fname += 4;
+            }
         }
         else {
-            fname = trealloc(fname, n_byte_fname + 3);
-            (void) memcpy(fname + n_byte_fname - 1, ".ps", 4);
-            n_byte_fname += 3;
+            /* change .tmp to .ps */
+            psfname = strchr(fname, '.');
+            if (psfname) {
+                psfname[1] = 'p';
+                psfname[2] = 's';
+                psfname[3] = '\0';
+            }
+            else {
+                fname = trealloc(fname, n_byte_fname + 3);
+                (void)memcpy(fname + n_byte_fname - 1, ".ps", 4);
+                n_byte_fname += 3;
+            }
         }
-        tempgraph->devdep = fname;
+        tempgraph->devdep = copy(fname);
         tempgraph->n_byte_devdep = n_byte_fname;
 
         if (NewViewport(tempgraph)) {
@@ -97,7 +128,8 @@ void com_hardcopy(wordlist *wl)
             return;
         }
         gr_resize(tempgraph);
-        gr_redraw(tempgraph);
+        /* use DevFinalize to add final statement in file, "/> or "stroke"*/
+        DevFinalize();
         DestroyGraph(tempgraph->graphid);
         DevSwitch(NULL);
         foundit = 1;
@@ -122,7 +154,7 @@ void com_hardcopy(wordlist *wl)
                 return;
             }
             tempgraph = CopyGraph(response.reply.graph);
-            tempgraph->devdep = fname;
+            tempgraph->devdep = copy(fname);
             tempgraph->n_byte_devdep = n_byte_fname;
             if (NewViewport(tempgraph)) {
                 DevSwitch(NULL);
@@ -225,6 +257,11 @@ void com_hardcopy(wordlist *wl)
                     "\nThe file \"%s\" may be printed on a postscript printer.\n",
                     fname);
         }
+        else if (!strcmp(devtype, "svg")) {
+            fprintf(cp_out,
+                "\nThe file \"%s\" has the Scalable Vector Graphics format.\n",
+                fname);
+        }
         else if (!strcmp(devtype, "MFB")) {
             fprintf(cp_out,
                     "The file \"%s\" may be printed on a MFB device.\n",
@@ -232,8 +269,11 @@ void com_hardcopy(wordlist *wl)
         }
     }
 
-    if (tempf && *device)
+    if (tempf && *device) {
         (void) unlink(fname);
+    }
+
+    tfree(fname);
 
     /* restore previous graphics context by retrieving the previous currentgraph */
     PopGraphContext();

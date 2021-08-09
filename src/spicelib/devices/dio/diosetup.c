@@ -15,6 +15,7 @@ Modified by Paolo Nenzi 2003 and Dietmar Warning 2012
 #include "diodefs.h"
 #include "ngspice/sperror.h"
 #include "ngspice/suffix.h"
+#include "ngspice/fteext.h"
 
 int
 DIOsetup(SMPmatrix *matrix, GENmodel *inModel, CKTcircuit *ckt, int *states)
@@ -23,6 +24,10 @@ DIOsetup(SMPmatrix *matrix, GENmodel *inModel, CKTcircuit *ckt, int *states)
     DIOinstance *here;
     int error;
     CKTnode *tmp;
+    double scale;
+
+    if (!cp_getvar("scale", CP_REAL, &scale, 0))
+        scale = 1;
 
     /*  loop through all the diode models */
     for( ; model != NULL; model = DIOnextModel(model)) {
@@ -166,6 +171,52 @@ DIOsetup(SMPmatrix *matrix, GENmodel *inModel, CKTcircuit *ckt, int *states)
             model->DIOrecSatCur = 1e-14;
         }
 
+        /* set lower limit of saturation current */
+        if (model->DIOsatCur < ckt->CKTepsmin)
+            model->DIOsatCur = ckt->CKTepsmin;
+
+        if(!model->DIOnomTempGiven) {
+            model->DIOnomTemp = ckt->CKTnomTemp;
+        }
+
+        if((!model->DIOresistGiven) || (model->DIOresist==0)) {
+            model->DIOconductance = 0.0;
+        } else {
+            model->DIOconductance = 1/model->DIOresist;
+        }
+
+        if (!model->DIOrth0Given) {
+            model->DIOrth0 = 0;
+        }
+        if (!model->DIOcth0Given) {
+            model->DIOcth0 = 1e-5;
+        }
+
+        if(!model->DIOlengthMetalGiven) {
+            model->DIOlengthMetal = 0.0;
+        }
+        if(!model->DIOlengthPolyGiven) {
+            model->DIOlengthPoly = 0.0;
+        }
+        if(!model->DIOwidthMetalGiven) {
+            model->DIOwidthMetal = 0.0;
+        }
+        if(!model->DIOwidthPolyGiven) {
+            model->DIOwidthPoly = 0.0;
+        }
+        if(!model->DIOmetalOxideThickGiven) {
+            model->DIOmetalOxideThick = 1e-06; /* m */
+        }
+        if(!model->DIOpolyOxideThickGiven) {
+            model->DIOpolyOxideThick = 1e-06; /* m */
+        }
+        if(!model->DIOmetalMaskOffsetGiven) {
+            model->DIOmetalMaskOffset = 0.0;
+        }
+        if(!model->DIOpolyMaskOffsetGiven) {
+            model->DIOpolyMaskOffset = 0.0;
+        }
+
         /* loop through all the instances of the model */
         for (here = DIOinstances(model); here != NULL ;
                 here=DIOnextInstance(here)) {
@@ -190,11 +241,38 @@ DIOsetup(SMPmatrix *matrix, GENmodel *inModel, CKTcircuit *ckt, int *states)
 
             here->DIOarea = here->DIOarea * here->DIOm;
             here->DIOpj = here->DIOpj * here->DIOm;
+            here->DIOcmetal = 0.0; 
+            here->DIOcpoly = 0.0; 
             if (model->DIOlevel == 3) {
+                double wm, lm, wp, lp;
                 if((here->DIOwGiven) && (here->DIOlGiven))  {
                     here->DIOarea = here->DIOw * here->DIOl * here->DIOm;
                     here->DIOpj = (2 * here->DIOw + 2 * here->DIOl) * here->DIOm;
                 }
+                here->DIOarea = here->DIOarea * scale * scale;
+                here->DIOpj = here->DIOpj * scale;
+                if (here->DIOwidthMetalGiven) 
+                    wm = here->DIOwidthMetal;
+                else
+                    wm = model->DIOwidthMetal;
+                if (here->DIOlengthMetalGiven) 
+                    lm = here->DIOlengthMetal;
+                else
+                    lm = model->DIOlengthMetal;
+                if (here->DIOwidthPolyGiven) 
+                    wp = here->DIOwidthPoly;
+                else
+                    wp = model->DIOwidthPoly;
+                if (here->DIOlengthPolyGiven) 
+                    lp = here->DIOlengthPoly;
+                else
+                    lp = model->DIOlengthPoly;
+                here->DIOcmetal = CONSTepsSiO2 / model->DIOmetalOxideThick  * here->DIOm
+                                  * (wm * scale + model->DIOmetalMaskOffset) 
+                                  * (lm * scale + model->DIOmetalMaskOffset);
+                here->DIOcpoly = CONSTepsSiO2 / model->DIOpolyOxideThick  * here->DIOm
+                                  * (wp * scale + model->DIOpolyMaskOffset) 
+                                  * (lp * scale + model->DIOpolyMaskOffset);
             }
             here->DIOforwardKneeCurrent = model->DIOforwardKneeCurrent * here->DIOarea;
             here->DIOreverseKneeCurrent = model->DIOreverseKneeCurrent * here->DIOarea;
@@ -229,6 +307,8 @@ DIOsetup(SMPmatrix *matrix, GENmodel *inModel, CKTcircuit *ckt, int *states)
                 }
             }
 
+            int selfheat = ((here->DIOtempNode > 0) && (here->DIOthermal) && (model->DIOrth0Given));
+
 /* macro to make elements with built in test for out of memory */
 #define TSTALLOC(ptr,first,second) \
 do { if((here->ptr = SMPmakeElt(matrix, here->first, here->second)) == NULL){\
@@ -242,6 +322,17 @@ do { if((here->ptr = SMPmakeElt(matrix, here->first, here->second)) == NULL){\
             TSTALLOC(DIOposPosPtr,DIOposNode,DIOposNode);
             TSTALLOC(DIOnegNegPtr,DIOnegNode,DIOnegNode);
             TSTALLOC(DIOposPrimePosPrimePtr,DIOposPrimeNode,DIOposPrimeNode);
+
+            if (selfheat) {
+                TSTALLOC(DIOtempPosPtr,      DIOtempNode,     DIOposNode);
+                TSTALLOC(DIOtempPosPrimePtr, DIOtempNode,     DIOposPrimeNode);
+                TSTALLOC(DIOtempNegPtr,      DIOtempNode,     DIOnegNode);
+                TSTALLOC(DIOtempTempPtr,     DIOtempNode,     DIOtempNode);
+                TSTALLOC(DIOposTempPtr,      DIOposNode,      DIOtempNode);
+                TSTALLOC(DIOposPrimeTempPtr, DIOposPrimeNode, DIOtempNode);
+                TSTALLOC(DIOnegTempPtr,      DIOnegNode,      DIOtempNode);
+            }
+
         }
     }
     return(OK);
