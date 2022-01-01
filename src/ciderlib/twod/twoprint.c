@@ -35,6 +35,7 @@ TWOprnSolution(FILE *file, TWOdevice *pDevice, OUTPcard *output, BOOLEAN asciiSa
   double *xScale = pDevice->xScale;
   double *yScale = pDevice->yScale;
   int ii;
+  int point_number = 0;
 
   if (output->OUTPnumVars == -1) {
     /* First pass. Need to count number of variables in output. */
@@ -320,7 +321,8 @@ TWOprnSolution(FILE *file, TWOdevice *pDevice, OUTPcard *output, BOOLEAN asciiSa
 	if (asciiSave) {
 	  for (ii = 0; ii < numVars; ii++) {
 	    if (ii == 0) {
-	        fprintf(file, "%d %d", yIndex, xIndex);
+	        fprintf(file, "%d", point_number);
+	        point_number++;
 	    }
 	    fprintf(file, "\t%e\n", data[ii]);
 	  } 
@@ -336,7 +338,8 @@ TWOprnSolution(FILE *file, TWOdevice *pDevice, OUTPcard *output, BOOLEAN asciiSa
 	if (asciiSave) {
 	  for (ii = 0; ii < numVars; ii++) {
 	    if (ii == 0) {
-	      fprintf(file, "%d %d", yIndex, xIndex);
+	      fprintf(file, "%d", point_number);
+	      point_number++;
 	    }
 	    fprintf(file, "\t%e\n", data[ii]);
 	  }
@@ -380,6 +383,7 @@ TWOmemStats(FILE *file, TWOdevice *pDevice)
   TWOchannel *pChannel;
   int numContactNodes;
 
+  if (!pDevice) { return; }
   fprintf(file, "----------------------------------------\n");
   fprintf(file, "Device %s Memory Usage:\n", pDevice->name );
   fprintf(file, "Item                     Count     Bytes\n");
@@ -460,10 +464,12 @@ void
 TWOcpuStats(FILE *file, TWOdevice *pDevice)
 {
   static const char cpuFormat[] = "%-20s%10g%10g%10g%10g%10g\n";
-  TWOstats *pStats = pDevice->pStats;
+  TWOstats *pStats = NULL;
   double total;
   int iTotal;
 
+  if (!pDevice) { return; }
+  pStats = pDevice->pStats;
   fprintf(file,
       "----------------------------------------------------------------------\n");
   fprintf(file,

@@ -14,6 +14,10 @@ libcpl_la_SOURCES = \
 	cplload.c  \
 	cplmpar.c  \
 	cplsetup.c \
+	cplhash.c  \
+    cplhash.h  \
+	cplmdel.c  \
+	cpldelete.c  \
 	cplinit.c
 
 AM_CPPFLAGS = @AM_CPPFLAGS@ -I$(top_srcdir)/src/include

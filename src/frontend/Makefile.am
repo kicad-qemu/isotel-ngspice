@@ -69,6 +69,8 @@ libfte_la_SOURCES = \
     com_sysinfo.c   \
     com_unset.c \
     com_unset.h \
+    com_wr_ic.c  \
+    com_wr_ic.h  \
     completion.h    \
     control.h   \
     control.c   \
@@ -128,6 +130,7 @@ libfte_la_SOURCES = \
     inp.h       \
     inpcom.c    \
     inpcom.h    \
+    inpc_probe.c    \
     interp.c    \
     interp.h    \
     inventory.c     \

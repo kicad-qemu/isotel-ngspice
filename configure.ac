@@ -16,7 +16,7 @@
 # problem to the user.
 AC_PREREQ([2.59])
 
-m4_define([ngspice_major_version], [35])
+m4_define([ngspice_major_version], [36])
 m4_define([ngspice_minor_version], [0])
 m4_define([ngspice_version],
       [ngspice_major_version])
@@ -117,7 +117,7 @@ LT_INIT([shared static])
 #  --> Set 'LT_NGSPICE_AGE' to 0.
 
 LT_NGSPICE_CURRENT=0
-LT_NGSPICE_REVISION=1
+LT_NGSPICE_REVISION=2
 LT_NGSPICE_AGE=0
 LIBNGSPICE_SO_VERSION=$LT_NGSPICE_CURRENT.$LT_NGSPICE_REVISION.$LT_NGSPICE_AGE
 
@@ -1304,6 +1304,8 @@ fi
 
 # Use AC_CHECK_HEADERS so the HAVE_*_H symbol gets defined
 AC_CHECK_HEADERS([ncurses/termcap.h termcap.h])
+AC_CHECK_HEADERS([sys/sysctl.h])
+
 
 # --enable-openmp: Use OpenMP on multi-core processors
 AC_ARG_ENABLE([openmp],

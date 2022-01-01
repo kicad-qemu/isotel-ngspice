@@ -123,6 +123,7 @@ extern void *cx_not(void *, short int , int , int *, short int *);
 
 extern void *cx_interpolate(void *, short int , int , int *, short int *, struct plot *, struct plot *, int );
 extern void *cx_deriv(void *, short int , int , int *, short int *, struct plot *, struct plot *, int );
+extern void *cx_integ(void *, short int , int , int *, short int *, struct plot *, struct plot *, int );
 extern void *cx_group_delay(void *, short int , int , int *, short int *, struct plot *, struct plot *, int );
 extern void *cx_fft(void *, short int , int , int *, short int *, struct plot *, struct plot *, int );
 extern void *cx_ifft(void *, short int , int , int *, short int *, struct plot *, struct plot *, int );
@@ -279,6 +280,7 @@ extern struct pnode *alloc_pnode(void);
         ptr = NULL;                             \
     } while(0)
 extern void free_pnode_x(struct pnode *t);
+extern struct pnode* ft_getpnames_quotes(wordlist* wl, bool check);
 
 /* plotcurve.c */
 

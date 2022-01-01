@@ -70,8 +70,12 @@ ft_evaluate(struct pnode *node)
         d = NULL;
     }
 
-    if (d == NULL)
+    if (d == NULL) {
+        if (node && node->pn_name) {
+            fprintf(stderr, "  in term: %s\n\n", node->pn_name);
+        }
         return NULL;
+    }
 
     if (node->pn_name && !ft_evdb && d && !d->v_link2) {
         if (d->v_name)
@@ -834,7 +838,7 @@ apply_func_funcall(struct func *func, struct dvec *v, int *newlength, short int 
     /* Modified for passing necessary parameters to the derive function - A.Roldan */
 
     if (eq(func->fu_name, "interpolate") || eq(func->fu_name, "deriv") || eq(func->fu_name, "group_delay")
-        || eq(func->fu_name, "fft") || eq(func->fu_name, "ifft"))       /* Ack */
+        || eq(func->fu_name, "fft") || eq(func->fu_name, "ifft") || eq(func->fu_name, "integ"))
     {
         void * (*f) (void *data, short int type, int length,
                      int *newlength, short int *newtype,

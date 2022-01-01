@@ -30,7 +30,7 @@ NUMD2ask(CKTcircuit *ckt, GENinstance *inInst, int which, IFvalue *value, IFvalu
     return (OK);
   case NUMD2_AREA:
     value->rValue = inst->NUMD2area;
-    break;
+    return (OK);
   case NUMD2_TEMP:
     value->rValue = inst->NUMD2temp - CONSTCtoK;
     return (OK);
@@ -116,5 +116,4 @@ NUMD2ask(CKTcircuit *ckt, GENinstance *inInst, int which, IFvalue *value, IFvalu
     return (E_BADPARM);
   }
   /* NOTREACHED */
-  return (E_BADPARM);
 }

@@ -84,6 +84,8 @@ libckt_la_SOURCES = \
 		ninteg.c	\
 		noisean.c	\
 		nsetparm.c	\
+		optran.c	\
+        com_optran.h    \
 		pzan.c		\
 		pzaskq.c	\
 		pzsetp.c	\
