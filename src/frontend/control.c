@@ -152,7 +152,9 @@ docommand(wordlist *wlist)
     wlist = cp_bquote(wlist);
     pwlist(wlist, "After backquote substitution");
 
-    wlist = cp_doglob(wlist);
+    /* Do not expand braces after command circbyline, keep them intact */
+    if (!eq(wlist->wl_word, "circbyline"))
+        wlist = cp_doglob(wlist);
     pwlist(wlist, "After globbing");
 
     pwlist_echo(wlist, "Becomes >");
@@ -227,7 +229,8 @@ docommand(wordlist *wlist)
         {
             int nargs = wl_length(wlist->wl_next);
             if (nargs < command->co_minargs) {
-                if (command->co_argfn) {
+                if (command->co_argfn &&
+                    cp_getvar("interactive", CP_BOOL, NULL, 0)) {
                     command->co_argfn (wlist->wl_next, command);
                 } else {
                     fprintf(cp_err, "%s: too few args.\n", s);
@@ -715,13 +718,18 @@ cp_evloop(char *string)
             if (!wlist->wl_next) {
                 cend[stackp]->co_numtimes = -1;
             } else {
-                char *s;
+                char *s = "1";
                 double val;
 
                 struct wordlist *t;  /*CDHW*/
                 /*CDHW wlist = cp_variablesubst(cp_bquote(cp_doglob(wl_copy(wlist)))); Wrong order? Leak? CDHW*/
                 t = cp_doglob(cp_bquote(cp_variablesubst(wl_copy(wlist)))); /*CDHW leak from cp_doglob? */
-                s = t->wl_next->wl_word;
+
+                if (!t->wl_next) {
+                    fprintf(cp_err, "Error: Undefined number after command 'repeat', assume 1\n");
+                }
+                else
+                    s = t->wl_next->wl_word;
 
                 if (ft_numparse(&s, FALSE, &val) > 0) {
                     /* Can be converted to int */

@@ -104,6 +104,18 @@ CKTdestroy(CKTcircuit *ckt)
 
     nghash_free(ckt->DEVnameHash, NULL, NULL);
     nghash_free(ckt->MODnameHash, NULL, NULL);
+
+#ifdef RFSPICE
+    FREE(ckt->CKTrfPorts);
+    freecmat(ckt->CKTAmat); ckt->CKTAmat = NULL;
+    freecmat(ckt->CKTBmat); ckt->CKTBmat = NULL;
+    freecmat(ckt->CKTSmat); ckt->CKTSmat = NULL;
+    freecmat(ckt->CKTYmat); ckt->CKTYmat = NULL;
+    freecmat(ckt->CKTZmat); ckt->CKTZmat = NULL;
+    freecmat(ckt->CKTNoiseCYmat); ckt->CKTNoiseCYmat = NULL;
+    freecmat(ckt->CKTadjointRHS); ckt->CKTadjointRHS = NULL;
+#endif
+
     FREE(ckt);
 
 #ifdef XSPICE

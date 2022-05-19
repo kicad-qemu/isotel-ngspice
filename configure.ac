@@ -16,7 +16,7 @@
 # problem to the user.
 AC_PREREQ([2.59])
 
-m4_define([ngspice_major_version], [36])
+m4_define([ngspice_major_version], [37])
 m4_define([ngspice_minor_version], [0])
 m4_define([ngspice_version],
       [ngspice_major_version])
@@ -117,7 +117,7 @@ LT_INIT([shared static])
 #  --> Set 'LT_NGSPICE_AGE' to 0.
 
 LT_NGSPICE_CURRENT=0
-LT_NGSPICE_REVISION=2
+LT_NGSPICE_REVISION=4
 LT_NGSPICE_AGE=0
 LIBNGSPICE_SO_VERSION=$LT_NGSPICE_CURRENT.$LT_NGSPICE_REVISION.$LT_NGSPICE_AGE
 
@@ -157,6 +157,10 @@ AC_ARG_ENABLE([adms],
 # --enable-pss: enable PSS Analysis
 AC_ARG_ENABLE([pss],
     [AS_HELP_STRING([--enable-pss], [Enable PSS Analysis, (experimental)])])
+
+# --disable-sp: disable S Parameter Analysis
+AC_ARG_ENABLE([sp],
+    [AS_HELP_STRING([--disable-sp], [Disable S parameter Analysis])])
 
 # --enable-relpath: Relative path for binary and data. Default is "no".
 # ngspice shared may want relative paths for spinit etc.
@@ -1161,12 +1165,22 @@ if test "x$enable_cider" = xyes; then
     AC_DEFINE([CIDER], [1], [The CIDER enhancements])
 fi
 
+# Add S parameter analysis to ngspice.
+if test "x$enable_sp" = xno; then
+    AC_MSG_RESULT([S parameter analysis disabled])
+    has_sp=false
+else
+    AC_MSG_RESULT([S parameter analysis enabled])
+    AC_DEFINE([RFSPICE], [1], [S parameter analysis])
+    has_sp=true
+fi
+
+AM_CONDITIONAL([SP_WANTED], [test "x$has_sp" = xtrue])
+
+
 AM_CONDITIONAL([CIDER_WANTED], [test "x$enable_cider" = xyes])
 AM_CONDITIONAL([NUMDEV_WANTED], [test "x$enable_cider" = xyes])
-
-
 AM_CONDITIONAL([PSS_WANTED], [test "x$enable_pss" = xyes])
-
 AM_CONDITIONAL([SENSE2_WANTED], [test "x$enable_sense2" = xyes])
 
 # adms option
@@ -1412,6 +1426,7 @@ AC_CONFIG_FILES([Makefile
                  src/maths/deriv/Makefile
                  src/maths/poly/Makefile
                  src/maths/sparse/Makefile
+                 src/maths/dense/Makefile
                  src/misc/Makefile
                  src/xspice/Makefile
                  src/xspice/cm/Makefile

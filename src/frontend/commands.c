@@ -247,13 +247,17 @@ struct comm spcp_coms[] = {
       arg_print,
       "[col] expr ... : Print vector values." } ,
 #ifdef XSPICE
+    { "esave", EVTsave, FALSE, TRUE,
+      { 040000, 040000, 040000, 040000 }, E_BEGINNING, 1, LOTS,
+      arg_enodes,
+      "all | none | node node ... : Save event values." } ,
     { "eprint", EVTprint, FALSE, TRUE,
       { 040000, 040000, 040000, 040000 }, E_BEGINNING, 1, LOTS,
-      NULL,
+      arg_enodes,
       "node node ... : Print event values." } ,
     { "eprvcd", EVTprintvcd, FALSE, TRUE,
       { 040000, 040000, 040000, 040000 }, E_BEGINNING, 1, LOTS,
-      NULL,
+      arg_enodes,
       "node node ... : Print event values into vcd file." },
     { "edisplay", EVTdisplay, FALSE, TRUE,
       { 040000, 040000, 040000, 040000 }, E_BEGINNING, 0, 0,
@@ -301,6 +305,13 @@ struct comm spcp_coms[] = {
       NULL,
       "[.pss line args] : Do a periodic state analysis." } ,
 /* SP */
+#endif
+#ifdef RFSPICE
+/* S parameter Analysis */
+    { "sp", com_sp, TRUE, TRUE,
+      { 0, 0, 0, 0 }, E_DEFHMASK, 0, LOTS,
+      NULL,
+      "[.sp line args] : Do an S-parameter analysis." },
 #endif
     { "ac", com_ac, TRUE, TRUE,
       { 0, 0, 0, 0 }, E_DEFHMASK, 0, LOTS,

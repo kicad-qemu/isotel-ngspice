@@ -264,10 +264,169 @@ int gr_init(double *xlims, double *ylims, /* The size of the screen. */
 }
 
 
+/* Once the line compression code is thorougly tested, checking code can
+ * be removed.  But for now ...
+ */
+#define LINE_COMPRESSION_CHECKS
+
+/* Data and functions for line compression:
+ * try to not keep drawing the same pixels by combining co-linear segments.
+ */
+
+static struct {
+    enum { EMPTY, LINE, VERTICAL } state;
+    int                            x_start, y_start, x_end, y_end;
+    int                            lc_min, lc_max;
+#define prev_x2 lc_min                    // Alternate name
+#ifdef LINE_COMPRESSION_CHECKS
+    struct dvec                   *dv;    // Sanity checking.
+#endif
+} LC;
+
+/* Flush pending line drawing. */
+
+static void LC_flush(void)
+{
+    switch (LC.state) {
+    case EMPTY:
+        return;
+    case LINE:
+        DevDrawLine(LC.x_start, LC.y_start, LC.x_end, LC.y_end, FALSE);
+        break;
+    case VERTICAL:
+        DevDrawLine(LC.x_start, LC.lc_min, LC.x_start, LC.lc_max, FALSE);
+        break;
+    }
+    LC.state = EMPTY;
+}
+
+/* This replaces DevDrawLine() - low-level line drawing call. */
+
+#ifdef LINE_COMPRESSION_CHECKS
+static void drawLine(int x1, int y1, int x2, int y2, struct dvec *dv)
+{
+    if (LC.dv) {
+        if (LC.dv != dv) {
+            fprintf(cp_err, "LC: DV changed!\n");
+            LC_flush();
+            LC.dv = dv;
+        }
+    } else {
+        LC.dv = dv;
+        if (LC.state != EMPTY) {
+            fprintf(cp_err, "LC: State %d but DV NULL.\n", (int)LC.state);
+            LC_flush();
+        }
+    }
+#else
+static void drawLine(int x1, int y1, int x2, int y2)
+{
+#endif
+    switch (LC.state) {
+    refill:
+        LC_flush();
+        // Fall through ...
+    case EMPTY:
+        if (x1 == x2) {
+            /* Vertical */
+
+            LC.state = VERTICAL;
+            LC.x_start = x1;
+            LC.y_end = y2;
+            if (y1 < y2) {
+                LC.lc_min = y1;
+                LC.lc_max = y2;
+            } else {
+                LC.lc_min = y2;
+                LC.lc_max = y1;
+            }
+        } else {
+            LC.state = LINE;
+            LC.prev_x2 = x2;
+
+            /* Store with LC.x_start < LC.x_end. */
+
+            if (x1 < x2) {
+                LC.x_start = x1;
+                LC.y_start = y1;
+                LC.x_end = x2;
+                LC.y_end = y2;
+            } else {
+                LC.x_start = x2;
+                LC.y_start = y2;
+                LC.x_end = x1;
+                LC.y_end = y1;
+            }
+        }
+        break;
+    case LINE:
+        if ((int64_t)(x2 - x1) * (LC.y_end - LC.y_start) !=
+            (int64_t)(y2 - y1) * (LC.x_end - LC.x_start)) {
+            /* Not in line. */
+
+            goto refill;
+        }
+        if (x1 != LC.prev_x2) {
+            /* Not contiguous. */
+
+            if (x1 > LC.x_end) {
+                if (x2 > LC.x_end) {
+                    /* Hole. */
+
+                    goto refill;
+                }
+                LC.x_end = x1;
+                LC.y_end = y1;
+            } else if (x1 < LC.x_start) {
+                if (x2 < LC.x_start) {
+                    /* Hole. */
+
+                    goto refill;
+                }
+                LC.x_start = x1;
+                LC.y_start = y1;
+            }
+        }
+
+        if (x2 > LC.x_end) {
+            LC.x_end = x2;
+            LC.y_end = y2;
+        } else if (x2 < LC.x_start) {
+            LC.x_start = x2;
+            LC.y_start = y2;
+        }
+        LC.prev_x2 = x2;
+        break;
+    case VERTICAL:
+        if (x1 != LC.x_start || x2 != LC.x_start)
+            goto refill;
+        if (y1 != LC.y_end) {
+            /* Not contiguous, check for hole. */
+
+            if (y1 < LC.lc_min) {
+                if (y2 < LC.lc_min)
+                    goto refill;
+                LC.lc_min = y1;
+            } else if (y1 > LC.lc_max) {
+                if (y2 > LC.lc_max)
+                    goto refill;
+                LC.lc_max = y1;
+            }
+        }
+
+        if (y2 < LC.lc_min)
+            LC.lc_min = y2;
+        else if (y2 > LC.lc_max)
+            LC.lc_max = y2;
+        LC.y_end = y2;
+        break;
+    }
+}
+
 /*
  *  Add a point to the curve we're currently drawing.
  *  Should be in between a gr_init() and a gr_end()
- *    expect when iplotting, very bad hack
+ *    except when iplotting, very bad hack
  *  Differences from old gr_point:
  *    We save points here, instead of in lower levels.
  *    Assume we are in right context
@@ -327,7 +486,11 @@ void gr_point(struct dvec *dv,
         /* If it's a linear plot, ignore first point since we don't
            want to connect with oldx and oldy. */
         if (np)
-            DevDrawLine(fromx, fromy, tox, toy, FALSE);
+#ifdef LINE_COMPRESSION_CHECKS
+            drawLine(fromx, fromy, tox, toy, dv);
+#else
+            drawLine(fromx, fromy, tox, toy);
+#endif
 
         if ((tics = currentgraph->ticdata) != NULL) {
             for (; *tics < HUGE; tics++)
@@ -348,7 +511,11 @@ void gr_point(struct dvec *dv,
         DatatoScreen(currentgraph,
                      0.0, currentgraph->datawindow.ymin,
                      &dummy, &ymin);
-        DevDrawLine(tox, ymin, tox, toy, FALSE);
+#ifdef LINE_COMPRESSION_CHECKS
+        drawLine(tox, ymin, tox, toy, dv);
+#else
+        drawLine(tox, ymin, tox, toy);
+#endif
         break;
     case PLOT_POINT:
         /* Here, gi_linestyle is the character used for the point.  */
@@ -497,7 +664,15 @@ void drawlegend(GRAPH *graph, int plotno, struct dvec *dv)
 /* end one plot of a graph */
 void gr_end(struct dvec *dv)
 {
+    LC_flush();
+#ifdef LINE_COMPRESSION_CHECKS
+    if (LC.dv && LC.dv != dv)
+        fprintf(cp_err, "LC: DV changed in gr_end()!\n");
+    else
+        LC.dv = NULL;
+#else
     NG_IGNORE(dv);
+#endif
     DevUpdate();
 }
 
@@ -684,11 +859,9 @@ static int iplot(struct plot *pl, int id)
     double start, stop, step;
     bool changed = FALSE;
     int yt;
-    char *yl = NULL;
     double xlims[2], ylims[2];
     static REQUEST reqst = { checkup_option, NULL };
     int inited = 0;
-    char commandline[513];
     int n_vec_plot = 0;
 
     /* Exit if nothing is being plotted */
@@ -703,6 +876,11 @@ static int iplot(struct plot *pl, int id)
     }
 
     if (len == IPOINTMIN || !id) { /* Do initialization */
+        unsigned int  index, node_len;
+        char          commandline[4196];
+
+        strcpy(commandline, "plot ");
+        index = 5;
         resumption = FALSE;
         /* Draw the grid for the first time, and plot everything. */
         lims = ft_minmax(xs, TRUE);
@@ -719,9 +897,13 @@ static int iplot(struct plot *pl, int id)
                 if (ylims[1] < lims[1]) {
                     ylims[1] = lims[1];
                 }
-                if (!yl) {
-                    yl = v->v_name;
-                }
+                node_len = (unsigned int)snprintf(commandline + index,
+                                                  (sizeof commandline) - index,
+                                                  "%s ", v->v_name);
+                if (commandline[index + node_len - 1] == ' ') // Not truncated
+                    index += node_len;
+                else
+                    commandline[index] = '\0';           // Crop partial name
             }
         }
 
@@ -745,14 +927,9 @@ static int iplot(struct plot *pl, int id)
             }
         }
 
-        /* note: have command options for iplot to specify xdelta,
-           etc.  So don't need static variables hack.  Assume default
-           values for now.  */
-        sprintf(commandline, "plot %s", yl);
-
         (void) gr_init(xlims, ylims, xs->v_name,
                 pl->pl_title, NULL, n_vec_plot, 0.0, 0.0,
-                GRID_LIN, PLOT_LIN, xs->v_name, yl, xs->v_type, yt,
+                GRID_LIN, PLOT_LIN, xs->v_name, "V", xs->v_type, yt,
                 plot_cur->pl_typename, commandline, 0);
 
         for (v = pl->pl_dvecs; v; v = v->v_next) {
@@ -767,6 +944,12 @@ static int iplot(struct plot *pl, int id)
     else {
         /* plot the last points and resize if needed */
         Input(&reqst, NULL);
+
+        /* Window was closed? */
+
+        if (!currentgraph)
+            return 0;
+
         /* First see if we have to make the screen bigger */
         dy = (isreal(xs) ? xs->v_realdata[len - 1] :
               realpart(xs->v_compdata[len - 1]));
@@ -895,6 +1078,10 @@ static int iplot(struct plot *pl, int id)
                              (isreal(v) ? v->v_realdata[len - 2] :
                               realpart(v->v_compdata[len - 2])),
                              len - 1);
+                    LC_flush();    // Disable line compression here ..
+#ifdef LINE_COMPRESSION_CHECKS
+                    LC.dv = NULL;  // ... and suppress warnings.
+#endif
                 }
             }
         }
@@ -919,6 +1106,8 @@ static void set(struct plot *plot, struct dbcomm *db, bool unset, short mode)
     }
 
     for (dc = db; dc; dc = dc->db_also) {
+        if (dc->db_nodename1 == NULL)
+            continue;
         v = vec_fromplot(dc->db_nodename1, plot);
         if (!v || v->v_plot != plot) {
             if (!eq(dc->db_nodename1, "0") && !unset) {
@@ -975,9 +1164,14 @@ void gr_iplot(struct plot *plot)
     hit = 0;
     for (db = dbs; db; db = db->db_next) {
         if (db->db_type == DB_IPLOT || db->db_type == DB_IPLOTALL) {
+            if (db->db_graphid) {
+                GRAPH *gr;
 
-            if (db->db_graphid)
-                PushGraphContext(FindGraph(db->db_graphid));
+                gr = FindGraph(db->db_graphid);
+                if (!gr)
+                    continue;
+                PushGraphContext(gr);
+            }
 
             set(plot, db, FALSE, VF_PLOT);
 

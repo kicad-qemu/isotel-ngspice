@@ -287,7 +287,7 @@ bool plotit(wordlist *wl, const char *hcopy, const char *devname)
     static GRIDTYPE gtype = GRID_LIN;
     static PLOTTYPE ptype = PLOT_LIN;
 
-    bool gfound = FALSE, pfound = FALSE, oneval = FALSE, contour2d = FALSE;
+    bool gfound = FALSE, pfound = FALSE, oneval = FALSE, contour2d = FALSE, digitop = FALSE;
     double ylims[2], xlims[2];
     struct pnode *pn, *names = NULL;
     struct dvec *d = NULL, *vecs = NULL, *lv = NULL, *lastvs = NULL;
@@ -365,6 +365,8 @@ bool plotit(wordlist *wl, const char *hcopy, const char *devname)
     contour2d = getflag(wl, "xycontour");
 
     /* Now extract all the parameters. */
+    digitop = getflag(wl, "digitop");
+
     sameflag = getflag(wl, "samep");
 
     if (!sameflag || !xlim) {
@@ -847,6 +849,38 @@ bool plotit(wordlist *wl, const char *hcopy, const char *devname)
             fprintf(cp_err, "Error(plotit.c--plotit): %s: zero length vector\n",
                     d->v_name);
             goto quit;
+        }
+    }
+
+    /* Add n * spacing (e.g. 1.3) to digital event node based vectors */
+    if (digitop) {
+        double spacing = 1.5;
+        double nn = 0.;
+        int ii = 0;
+        for (d = vecs; d; d = d->v_link2) {
+            if (d->v_scale && eq(d->v_scale->v_name, "step") && (d->v_scale->v_type == SV_TIME) && (d->v_type == SV_VOLTAGE) && (d->v_length > 1)) {
+                for (ii = 0; ii < d->v_length; ii++) {
+                    d->v_realdata[ii] += nn;
+                }
+                nn += spacing;
+            }
+        }
+        if (!ydelta)
+            ydelta = TMALLOC(double, 1);
+        *ydelta = spacing;
+        if (!ylim) {
+            ylim = TMALLOC(double, 2);
+            ylim[0] = 0;
+            ylim[1] = nn;
+        }
+        else {
+            if (ylim[0] < 1.5)
+            /* catch the bottom line */
+                ylim[0] = 0;
+            else
+            /* If we redraw, set again multiples of 'spacing' */
+                ylim[0] = ((int)(ylim[0] / spacing) + 1) * spacing;
+            ylim[1] = ((int)(ylim[1] / spacing) + 1) * spacing;
         }
     }
 
