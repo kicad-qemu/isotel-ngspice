@@ -52,6 +52,11 @@ Author: 1985 Wayne A. Christopher
 /* gtri - end - 12/12/90 */
 #endif
 
+#define INTEGRATE_UDEVICES
+#ifdef INTEGRATE_UDEVICES
+#include "ngspice/udevices.h"
+#endif
+
 /* SJB - Uncomment this line for debug tracing */
 /*#define TRACE*/
 
@@ -187,6 +192,7 @@ static void inp_get_w_l_x(struct card* oldcard);
 
 static char* eval_m(char* line, char* tline);
 static char* eval_tc(char* line, char* tline);
+static char* eval_mvalue(char* line, char* tline);
 
 static void rem_double_braces(struct card* card);
 
@@ -194,9 +200,6 @@ extern void inp_probe(struct card* card);
 #ifndef EXT_ASC
 static void utf8_syntax_check(struct card *deck);
 #endif
-
-struct card* insert_new_line(
-    struct card* card, char* line, int linenum, int linenum_orig);
 
 struct inp_read_t {
     struct card *cc;
@@ -405,7 +408,10 @@ static int is_cider_model(char *buf)
 }
 #endif
 
-/* insert a new card, just behind the given card */
+/* Insert a new card, just behind the given card.
+ * The new card takes ownership of the memory pointed to by "line".
+ */
+
 struct card *insert_new_line(
         struct card *card, char *line, int linenum, int linenum_orig)
 {
@@ -1049,7 +1055,8 @@ struct card *inp_readall(FILE *fp, const char *dir_name,
             inp_rem_unused_models(root, working);
         }
 
-        rem_mfg_from_models(working);
+        if (newcompat.lt || newcompat.ps)
+            rem_mfg_from_models(working);
 
         subckt_params_to_param(working);
 
@@ -1082,8 +1089,12 @@ struct card *inp_readall(FILE *fp, const char *dir_name,
             inp_fix_gnd_name(working);
         inp_chk_for_multi_in_vcvs(working, &rv.line_number);
 
-        if (cp_getvar("addcontrol", CP_BOOL, NULL, 0))
+        /* "addcontrol" variable is set if "ngspice -a file" was used. */
+
+        if (cp_getvar("addcontrol", CP_BOOL, NULL, 0)) {
             inp_add_control_section(working, &rv.line_number);
+            cp_remvar("addcontrol"); // Use only for initial netlist
+        }
 #ifdef XSPICE
         if (inp_poly_2g6_compat(working)) {
             inp_rem_levels(root);
@@ -2164,76 +2175,44 @@ static void inp_chk_for_multi_in_vcvs(struct card *c, int *line_number)
 
 
 /* If ngspice is started with option -a, then variable 'autorun'
- *   will be set and the following function scans the deck.
- * If 'run' is not found, a .control section will be added:
+ * will be set and a control section is inserted to try and ensure
+ * some analysis is done;
+ *
  *   .control
- *   run
- *   op              ; if .op is found
+ *   strcmp __flag $curplot const
+ *   if $__flag eq 0
+ *     run
+ *   end
  *   write rawfile   ; if rawfile given
  *   .endc
+ *
+ * The effect is that "run" is executed if there was no previous
+ * analysis.
  */
 static void inp_add_control_section(struct card *deck, int *line_number)
 {
-    struct card *c, *prev_card = NULL;
-    bool found_control = FALSE, found_run = FALSE;
-    bool found_end = FALSE;
-    char *op_line = NULL, rawfile[1000], *line;
+    static const char * const cards[] =
+        {".control", "strcmp __flag $curplot const", "if $__flag eq 0",
+         "  run", "end", NULL};
+    const char   * const *lp;
+    struct card   *c, *prev_card = NULL, *last_end = NULL;
+    char           rawfile[1000], *line;
 
     for (c = deck; c; c = c->nextcard) {
-
-        if (*c->line == '*')
-            continue;
-
-        if (ciprefix(".op ", c->line)) {
-            *c->line = '*';
-            op_line = c->line + 1;
-        }
-
         if (ciprefix(".end", c->line))
-            found_end = TRUE;
-
-        if (found_control && ciprefix("run", c->line))
-            found_run = TRUE;
-
-        if (ciprefix(".control", c->line))
-            found_control = TRUE;
-
-        if (ciprefix(".endc", c->line)) {
-            found_control = FALSE;
-
-            if (!found_run) {
-                prev_card = insert_new_line(
-                        prev_card, copy("run"), (*line_number)++, 0);
-                found_run = TRUE;
-            }
-
-            if (cp_getvar("rawfile", CP_STRING, rawfile, sizeof(rawfile))) {
-                line = tprintf("write %s", rawfile);
-                prev_card =
-                        insert_new_line(prev_card, line, (*line_number)++, 0);
-            }
-        }
-
+            last_end = prev_card;
         prev_card = c;
     }
 
-    // check if need to add control section
-    if (!found_run && found_end) {
-
-        deck = insert_new_line(deck, copy(".control"), (*line_number)++, 0);
-
-        deck = insert_new_line(deck, copy("run"), (*line_number)++, 0);
-
-        if (op_line)
-            deck = insert_new_line(deck, copy(op_line), (*line_number)++, 0);
-
-        if (cp_getvar("rawfile", CP_STRING, rawfile, sizeof(rawfile))) {
-            line = tprintf("write %s", rawfile);
-            deck = insert_new_line(deck, line, (*line_number)++, 0);
-        }
-
-        deck = insert_new_line(deck, copy(".endc"), (*line_number)++, 0);
+    if (last_end)
+        prev_card = last_end;
+    for (lp = cards; *lp; ++lp)
+        prev_card = insert_new_line(prev_card, copy(*lp), (*line_number)++, 0);
+    if (cp_getvar("rawfile", CP_STRING, rawfile, sizeof(rawfile))) {
+        line = tprintf("write %s", rawfile);
+        prev_card = insert_new_line(prev_card, line, (*line_number)++, 0);
     }
+    insert_new_line(prev_card, copy(".endc"), (*line_number)++, 0);
 }
 
 
@@ -3690,9 +3669,12 @@ static void inp_fix_inst_calls_for_numparam(
 
             if (find_name(subckt_w_params, subckt_name)) {
                 struct card *d;
-
-                d = find_subckt(c->level, subckt_name)->line;
-                {
+                struct card_assoc* ca = find_subckt(c->level, subckt_name);
+                if (ca)
+                    d = ca->line;
+                else
+                    continue;
+                if (d) {
                     char *subckt_line = d->line;
                     subckt_line = skip_non_ws(subckt_line);
                     subckt_line = skip_ws(subckt_line);
@@ -5159,10 +5141,11 @@ char *ya_search_identifier(char *str, const char *identifier, char *str_begin)
     return str;
 }
 
-
+/* Check for 'identifier' being in string str, surrounded by chars
+   not being a member of alphanumeric or '_' characters. */
 char *search_plain_identifier(char *str, const char *identifier)
 {
-    if (str && identifier) {
+    if (str && identifier && *identifier != '\0') {
         char *str_begin = str;
         while ((str = strstr(str, identifier)) != NULL) {
             char before;
@@ -5261,9 +5244,9 @@ static char* eval_tc(char* line, char *tline) {
     return ret_str;
 }
 
-/* return a string that consists of m evaluated
-   or having a rhs for numparam expansion {...}.
-   The retun string has to be freed by the caller after its usage. */
+/* return a string that consists of m evaluated (like m=5)
+   or having a rhs for numparam expansion m={...}.
+   The return string has to be freed by the caller after its usage. */
 static char* eval_m(char* line, char* tline) {
     double m;
     char* str_ptr, * m_ptr, * m_str = NULL;
@@ -5275,7 +5258,7 @@ static char* eval_m(char* line, char* tline) {
             m_ptr = str_ptr + 2;
             int error = 0;
             m = INPevaluate(&m_ptr, &error, 1);
-            /*We have a value and create the tc1 string */
+            /*We have a value and create the m string */
             if (error == 0) {
                 m_str = tprintf("m=%15.8e", m);
             }
@@ -5298,6 +5281,48 @@ static char* eval_m(char* line, char* tline) {
     }
     else {
         m_str = copy(" ");
+    }
+
+    return m_str;
+}
+
+/* return a string that consists of the m value only.
+   If m is not given, return string "1".
+   The return string has to be freed by the caller after its usage. */
+static char* eval_mvalue(char* line, char* tline) {
+    double m;
+    char* str_ptr, * m_ptr, * m_str = NULL;
+    char* cut_line = line;
+    str_ptr = strstr(cut_line, "m=");
+    if (str_ptr) {
+        /* We need to have 'm=something */
+        if (str_ptr[2]) {
+            m_ptr = str_ptr + 2;
+            int error = 0;
+            m = INPevaluate(&m_ptr, &error, 1);
+            /*We have a value and create the m string */
+            if (error == 0) {
+                m_str = tprintf("%15.8e", m);
+            }
+            else if (error == 1 && *m_ptr == '{' && m_ptr + 1 && *(m_ptr + 1) != '}') {
+                char* bra = gettok_char(&m_ptr, '}', TRUE, TRUE);
+                if (bra) {
+                    m_str = tprintf("%s", bra);
+                    tfree(bra);
+                }
+                else {
+                    fprintf(stderr, "Warning: Cannot copy m in line\n   %s\n   ignored\n", tline);
+                    m_str = copy(" ");
+                }
+            }
+            else {
+                fprintf(stderr, "Warning: Cannot copy m in line\n   %s\n   ignored\n", tline);
+                m_str = copy(" ");
+            }
+        }
+    }
+    else {
+        m_str = copy("1");
     }
 
     return m_str;
@@ -5931,7 +5956,7 @@ static void inp_compat(struct card *card)
             /* evauate tc1 and tc2 */
             char* tcrstr = eval_tc(cut_line, card->line);
 
-            /* evauate m */
+            /* evaluate m */
             char* mstr = eval_m(cut_line, card->line);
 
             /* white noise model by x2line, x3line, x4line
@@ -6012,10 +6037,13 @@ static void inp_compat(struct card *card)
             /* evauate tc1 and tc2 */
             char* tcrstr = eval_tc(cut_line, card->line);
 
+            /* evaluate m */
+            char* mstr = eval_mvalue(cut_line, card->line);
+
             if (strstr(curr_line, "c=")) { /* capacitance formulation */
                 // Exxx  n-aux 0  n2 n1  1
-                ckt_array[0] = tprintf("e%s %s_int1 0 %s %s 1", title_tok,
-                        title_tok, node2, node1);
+                ckt_array[0] = tprintf("e%s %s_int1 0 %s %s %s", title_tok,
+                        title_tok, node2, node1, mstr);
                 // Cxxx  n-aux 0  1
                 ckt_array[1] = tprintf("c%s %s_int1 0 1", title_tok, title_tok);
                 // Bxxx  n1 n2  I = i(Exxx) * equation
@@ -6024,8 +6052,8 @@ static void inp_compat(struct card *card)
                         title_tok, node1, node2, title_tok, equation, tcrstr);
             } else {                       /* charge formulation */
                 // Gxxx  n1 n2 n-aux 0  1
-                ckt_array[0] = tprintf("g%s %s %s %s_int1 0 1", 
-                            title_tok, node1, node2, title_tok);
+                ckt_array[0] = tprintf("g%s %s %s %s_int1 0 %s",
+                            title_tok, node1, node2, title_tok, mstr);
                 // Lxxx  n-aux 0 1
                 ckt_array[1] = tprintf("l%s %s_int1 0 1", title_tok, title_tok);
                 // Bxxx  0 n-aux I = equation
@@ -6034,6 +6062,7 @@ static void inp_compat(struct card *card)
                         title_tok, title_tok, equation, tcrstr);
             }
             tfree(tcrstr);
+            tfree(mstr);
             // comment out current variable capacitor line
             *(card->line) = '*';
             // insert new B source line immediately after current line
@@ -6083,17 +6112,21 @@ static void inp_compat(struct card *card)
             /* evauate tc1 and tc2 */
             char* tcrstr = eval_tc(cut_line, card->line);
 
+            /* evaluate m */
+            char* mstr = eval_mvalue(cut_line, card->line);
+
             // Fxxx  n-aux 0  Bxxx  1
             ckt_array[0] = tprintf("f%s %s_int2 0 b%s -1",
                     title_tok, title_tok, title_tok);
             // Lxxx  n-aux 0  1
             ckt_array[1] = tprintf("l%s %s_int2 0 1", title_tok, title_tok);
             // Bxxx  n1 n2  V = v(n-aux) * equation
-            ckt_array[2] = tprintf("b%s %s %s v = v(%s_int2) * (%s) "
+            ckt_array[2] = tprintf("b%s %s %s v = v(%s_int2) * (%s) / %s "
                                     "%s reciproctc=0",
-                    title_tok, node2, node1, title_tok, equation, tcrstr);
+                    title_tok, node2, node1, title_tok, equation, mstr, tcrstr);
 
             tfree(tcrstr);
+            tfree(mstr);
             // comment out current variable inductor line
             *(card->line) = '*';
             // insert new B source line immediately after current line
@@ -7567,24 +7600,27 @@ static void inp_quote_params(struct card *c, struct card *end_c,
             }
         }
         /* Now check if we have nested {..{  }...}, which is not accepted by numparam code.
-           Replace the inner { } by ( ) */
+           Replace the inner { } by ( ). Do this only when this is not a behavioral device
+           which will become a B source. B source handling is special in inp.c. */
         char* cut_line = c->line;
-        cut_line = strchr(cut_line, '{');
-        if (cut_line) {
-            int level = 1;
-            cut_line++;
-            while (*cut_line != '\0') {
-                if (*cut_line == '{') {
-                    level++;
-                    if (level > 1)
-                        *cut_line = '(';
-                }
-                else if (*cut_line == '}') {
-                    if (level > 1)
-                        *cut_line = ')';
-                    level--;
-                }
+        if (!b_transformation_wanted(cut_line)) {
+            cut_line = strchr(cut_line, '{');
+            if (cut_line) {
+                int level = 1;
                 cut_line++;
+                while (*cut_line != '\0') {
+                    if (*cut_line == '{') {
+                        level++;
+                        if (level > 1)
+                            *cut_line = '(';
+                    }
+                    else if (*cut_line == '}') {
+                        if (level > 1)
+                            *cut_line = ')';
+                        level--;
+                    }
+                    cut_line++;
+                }
             }
         }
     }
@@ -7880,6 +7916,9 @@ static void inp_meas_current(struct card *deck)
             }
 
             if (*curr_line == '*')
+                continue;
+
+            if (*curr_line == '\0')
                 continue;
 
             if (*curr_line == '.') {
@@ -8227,6 +8266,174 @@ static void rem_double_braces(struct card* newcard)
     }
 }
 
+#ifdef INTEGRATE_UDEVICES
+static void list_the_cards(struct card *startcard, char *prefix)
+{
+    struct card *card;
+    if (!startcard) { return; }
+    for (card = startcard; card; card = card->nextcard) {
+        char* cut_line = card->line;
+        printf("%s %s\n", prefix, cut_line);
+    }
+}
+
+static struct card *the_last_card(struct card *startcard)
+{
+    struct card *card, *lastcard = NULL;
+    if (!startcard) { return NULL; }
+    for (card = startcard; card; card = card->nextcard) {
+        lastcard = card;
+    }
+    return lastcard;
+}
+ static void remove_old_cards(struct card *first, struct card *stop)
+{
+    struct card *x, *y, *next = NULL, *nexta = NULL;
+    if (!first || !stop || (first == stop)) { return; }
+    for (x = first; (x && (x != stop)); x = next) {
+        if (x->line) { tfree(x->line); }
+        if (x->error) { tfree(x->error); }
+        for (y = x->actualLine; y; y = nexta) {
+            if (y->line) { tfree(y->line); }
+            if (y->error) { tfree(y->error); }
+            nexta = y->nextcard;
+            tfree(y);
+        }
+        next = x->nextcard;
+        tfree(x);
+    }
+
+}
+
+static struct card *u_instances(struct card *startcard)
+{
+    struct card *card, *returncard = NULL, *subcktcard = NULL;
+    struct card *newcard = NULL, *last_newcard = NULL;
+    int models_ok = 0, models_not_ok = 0;
+    int udev_ok = 0, udev_not_ok = 0;
+    BOOL create_called = FALSE, repeat_pass = FALSE;
+    BOOL skip_next = FALSE;
+
+    card = startcard;
+    while (card) {
+        char *cut_line = card->line;
+
+        skip_next = FALSE;
+        if (ciprefix(".subckt", cut_line)) {
+            models_ok = models_not_ok = 0;
+            udev_ok = udev_not_ok = 0;
+            subcktcard = card;
+            if (!repeat_pass) {
+                if (create_called) {
+                    cleanup_udevice();
+                }
+                initialize_udevice(subcktcard->line);
+                create_called = TRUE;
+            }
+        } else if (ciprefix(".ends", cut_line)) {
+            if (repeat_pass) {
+                newcard = replacement_udevice_cards();
+                if (newcard) {
+                    char *tmp = NULL, *pos, *posp, *new_str = NULL, *cl;
+                    /* Pspice definition of .subckt card:
+                       .SUBCKT <name> [node]*
+                       + [OPTIONAL: < <interface node> = <default value> >*]
+                       + [PARAMS: < <name> = <value> >* ]
+                       + [TEXT: < <name> = <text value> >* ]
+                       ...
+                       .ENDS
+                    */
+                    cl = subcktcard->line;
+                    tmp = TMALLOC(char, strlen(cl) + 1);
+                    (void) memcpy(tmp, cl, strlen(cl) + 1);
+                    pos = strstr(tmp, "optional:");
+                    posp = strstr(tmp, "params:");
+                    /* If there is an optional: and a param: then posp > pos */
+                    if (pos) {
+                        /* Remove the optional: section if present */
+                        *pos = '\0';
+                        if (posp) {
+                            strcat(tmp, posp);
+                        }
+                    }
+                    new_str = copy(tmp);
+                    tfree(tmp);
+                    remove_old_cards(subcktcard->nextcard, card);
+                    subcktcard->nextcard = newcard;
+                    tfree(subcktcard->line);
+                    subcktcard->line = new_str;
+                    if (ft_ngdebug) {
+                        printf("%s\n", new_str);
+                        list_the_cards(newcard, "Replacement:");
+                    }
+                    last_newcard = the_last_card(newcard);
+                    if (last_newcard) {
+                        last_newcard->nextcard = card; // the .ends card
+                    }
+                } else {
+                    models_ok = models_not_ok = 0;
+                    udev_ok = udev_not_ok = 0;
+                }
+            }
+            if (models_not_ok > 0 || udev_not_ok > 0) {
+                repeat_pass = FALSE;
+                cleanup_udevice();
+                create_called = FALSE;
+            } else if (udev_ok > 0) {
+                repeat_pass = TRUE;
+                card = subcktcard;
+                skip_next = TRUE;
+            } else {
+                repeat_pass = FALSE;
+                cleanup_udevice();
+                create_called = FALSE;
+            }
+            subcktcard = NULL;
+        } else if (ciprefix(".model", cut_line)) {
+            if (subcktcard && !repeat_pass) {
+                if (!u_process_model_line(cut_line)) {
+                    models_not_ok++;
+                } else {
+                    models_ok++;
+                }
+            }
+        } else if (ciprefix("u", cut_line)) {
+            if (subcktcard) {
+                if (repeat_pass) {
+                    if (!u_process_instance(cut_line)) {
+                        repeat_pass = FALSE;
+                        cleanup_udevice();
+                        create_called = FALSE;
+                        subcktcard = NULL;
+                        models_ok = models_not_ok = 0;
+                        udev_ok = udev_not_ok = 0;
+                        skip_next = FALSE;
+                    }
+                } else {
+                    if (u_check_instance(cut_line)) {
+                        udev_ok++;
+                    } else {
+                        udev_not_ok++;
+                    }
+                }
+            }
+        } else {
+            if (!ciprefix("*", cut_line)) {
+                udev_not_ok++;
+            }
+        }
+
+        if (!skip_next) {
+            card = card->nextcard;
+        }
+    }
+    if (create_called) {
+        cleanup_udevice();
+    }
+    return returncard;
+}
+#endif
+
 /**** PSPICE to ngspice **************
 * .model replacement in ako (a kind of) model descriptions
 * replace the E source TABLE function by a B source pwl
@@ -8304,6 +8511,20 @@ static struct card *pspice_compat(struct card *oldcard)
     new_str = copy(".func int(x) { sign(x)*floor(abs(x)) }");
     nextcard = insert_new_line(nextcard, new_str, 9, 0);
     nextcard->nextcard = oldcard;
+
+#ifdef INTEGRATE_UDEVICES
+    {
+        struct card *ucard;
+#ifdef TRACE
+        list_the_cards(newcard, "Before udevices");
+#endif
+        ucard = u_instances(newcard);
+#ifdef TRACE
+        list_the_cards(newcard, "After udevices");
+#endif
+    }
+#endif
+
 
     /* add predefined parameters TEMP, VT after each subckt call */
     /* FIXME: This should not be necessary if we had a better sense of
@@ -8608,9 +8829,8 @@ static struct card *pspice_compat(struct card *oldcard)
             }
         }
         /* We may have '~' in path names or A devices */
-        char *firsttok = nexttok(card->line); /* skip over whitespaces */
-        if (ciprefix(".inc", firsttok) || ciprefix(".lib", firsttok) ||
-                ciprefix("A", firsttok))
+        if (ciprefix(".inc", card->line) || ciprefix(".lib", card->line) ||
+                ciprefix("A", card->line))
             continue;
 
         if ((t = strstr(card->line, "~")) != NULL) {
@@ -9370,6 +9590,13 @@ static struct card *ltspice_compat(struct card *oldcard)
                     search_plain_identifier(card->line, "ilimit")) {
                 char *modname;
 
+                /* remove parameter 'noiseless' (the model is noiseless anyway) */
+                char *nonoise = search_plain_identifier(card->line, "noiseless");
+                if (nonoise) {
+                    size_t iii;
+                    for (iii = 0; iii < 9; iii++)
+                        nonoise[iii] = ' ';
+                }
                 card->line = str = inp_remove_ws(card->line);
                 str = nexttok(str); /* throw away '.model' */
                 INPgetNetTok(&str, &modname, 0); /* model name */
@@ -9639,8 +9866,8 @@ static void rem_mfg_from_models(struct card *deck)
             continue;
         /* remove mfg=name */
         if (ciprefix(".model", curr_line)) {
-            start = strstr(curr_line, "mfg=");
-            if (start) {
+            start = search_plain_identifier(curr_line, "mfg");
+            if (start && start[3] == '=') {
                 end = nexttok(start);
                 if (*end == '\0')
                     *start = '\0';
@@ -9650,8 +9877,8 @@ static void rem_mfg_from_models(struct card *deck)
                         start++;
                     }
             }
-            start = strstr(curr_line, "icrating=");
-            if (start) {
+            start = search_plain_identifier(curr_line, "icrating");
+            if (start && start[8] == '=') {
                 end = nexttok(start);
                 if (*end == '\0')
                     *start = '\0';
@@ -9661,8 +9888,8 @@ static void rem_mfg_from_models(struct card *deck)
                         start++;
                     }
             }
-            start = strstr(curr_line, "vceo=");
-            if (start) {
+            start = search_plain_identifier(curr_line, "vceo");
+            if (start && start[4] == '=') {
                 end = nexttok(start);
                 if (*end == '\0')
                     *start = '\0';
@@ -9672,8 +9899,8 @@ static void rem_mfg_from_models(struct card *deck)
                         start++;
                     }
             }
-            start = strstr(curr_line, "type=");
-            if (start) {
+            start = search_plain_identifier(curr_line, "type");
+            if (start && start[4] == '=') {
                 end = nexttok(start);
                 if (*end == '\0')
                     *start = '\0';

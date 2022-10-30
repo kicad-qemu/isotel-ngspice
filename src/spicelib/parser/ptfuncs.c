@@ -70,7 +70,24 @@ PTdivide(double arg1, double arg2)
 double
 PTpower(double arg1, double arg2)
 {
-    return pow(fabs(arg1), arg2);
+    double res;
+    if (newcompat.lt) {
+        if(arg1 >= 0)
+            res = pow(arg1, arg2);
+        else {
+            /* If arg2 is quasi an integer, round it to have pow not fail
+               when arg1 is negative. Takes into account the double 
+               representation which sometimes differs in the last digit. */
+            if (AlmostEqualUlps(trunc(arg2), arg2, 3))
+                res = pow(arg1, round(arg2));
+            else
+                /* As per LTSPICE specification for ** */
+                res = 0;
+        }
+    }
+    else
+        res = pow(fabs(arg1), arg2);
+    return res;
 }
 
 double
@@ -216,21 +233,29 @@ PTcosh(double arg)
 }
 
 /* Limit the exp: If arg > EXPARGMAX (arbitrarily selected to 14), continue with linear output,
-   if compatmode PSPICE is selected*/
+   if compatmode PSPICE is selected.
+   If arg exceeds 227.9559242, output its exp value 1e99. */
 double
 PTexp(double arg)
 {
     if (newcompat.ps && arg > EXPARGMAX)
         return EXPMAX * (arg - EXPARGMAX + 1.);
+    else if (arg > 227.9559242)
+        return 1e99;
     else
         return (exp(arg));
 }
 
+/* If arg < , returning HUGE will lead to an error message.
+   If arg == 0, don't bail out, but return an arbitrarily very negative value (-1e99).
+   Arg 0 may happen, when starting iteration for op or dc simulation. */
 double
 PTlog(double arg)
 {
     if (arg < 0.0)
         return (HUGE);
+    if (arg == 0)
+        return -1e99;
     return (log(arg));
 }
 
@@ -239,6 +264,8 @@ PTlog10(double arg)
 {
     if (arg < 0.0)
         return (HUGE);
+    if (arg == 0)
+        return -1e99;
     return (log10(arg));
 }
 

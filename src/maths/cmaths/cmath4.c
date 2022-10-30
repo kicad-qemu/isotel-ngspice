@@ -3,17 +3,20 @@ Copyright 1990 Regents of the University of California.  All rights reserved.
 Author: 1985 Wayne A. Christopher, U. C. Berkeley CAD Group
 **********/
 
-/*
- * Routines to do complex mathematical functions. These routines require
- * the -lm libraries. We sacrifice a lot of space to be able
- * to avoid having to do a seperate call for every vector element,
- * but it pays off in time savings.  These routines should never
- * allow FPE's to happen.
- *
- * Complex functions are called as follows:
- *  cx_something(data, type, length, &newlength, &newtype),
- *  and return a char * that is cast to complex or double.
- */
+/** \file cmath4.c
+    \brief functions for the control language parser: and, or, not, interpolate, deriv, integ, group_delay, fft, ifft
+
+    Routines to do complex mathematical functions. These routines require
+    the -lm libraries. We sacrifice a lot of space to be able
+    to avoid having to do a seperate call for every vector element,
+    but it pays off in time savings.  These routines should never
+    allow FPE's to happen.
+
+    Complex functions are called as follows:
+     cx_something(data, type, length, &newlength, &newtype),
+     and return a char * that is cast to complex or double.
+*/
+
 
 #include "ngspice/ngspice.h"
 #include "ngspice/plot.h"
@@ -496,18 +499,22 @@ cx_group_delay(void *data, short int type, int length, int *newlength, short int
         return (NULL);
     }
 
-
-    if (type == VF_COMPLEX)
-        for (i = 0; i < length; i++)
-        {
-            v_phase[i] = radtodeg(cph(cc[i]));
+    if (type == VF_COMPLEX) {
+        /*  accept continuous phase over 90° boundaries */
+        double last_ph = cph(cc[0]);
+        v_phase[0] = radtodeg(last_ph);
+        for (i = 1; i < length; i++) {
+            double ph = cph(cc[i]);
+            last_ph = ph - (2 * M_PI) * floor((ph - last_ph) / (2 * M_PI) + 0.5);
+            v_phase[i] = radtodeg(last_ph);
+//            fprintf(stderr, "v_phase %e, cc %e %e\n", v_phase[i], cc[i].cx_real, cc[i].cx_imag);
         }
+    }
     else
     {
         fprintf(cp_err, "Signal must be complex to calculate group delay\n");
         return (NULL);
     }
-
 
     type = VF_REAL;
 

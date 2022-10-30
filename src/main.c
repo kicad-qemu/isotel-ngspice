@@ -593,18 +593,12 @@ app_event_func(void)
 
 #endif
 
-/* -------------------------------------------------------------------------- */
-/* This is the command processing loop for spice and nutmeg.
-   The function is called even when GNU readline is unavailable, in which
-   case it falls back to repeatable calling cp_evloop()
-   SJB 26th April 2005 */
+/* Initialisation for readline. */
+
 static void
-app_rl_readlines(void)
+app_rl_init(void)
 {
 #if defined(HAVE_GNUREADLINE) || defined(HAVE_BSDEDITLINE)
-    /* GNU Readline Support -- Andrew Veliath <veliaa@rpi.edu> */
-    char *line, *expanded_line;
-
     /* ---  set up readline params --- */
     strcpy(history_file, getenv("HOME"));
     strcat(history_file, "/.");
@@ -617,16 +611,31 @@ app_rl_readlines(void)
     rl_readline_name = application_name;
     rl_instream = cp_in;
     rl_outstream = cp_out;
-#ifndef X_DISPLAY_MISSING
-    if (dispdev->Input == X11_Input)
-        rl_event_hook = app_event_func;
-#endif
     rl_catch_signals = 0;   /* disable signal handling  */
 
     /* sjb - what to do for editline?
        This variable is not supported by editline. */
 #if defined(HAVE_GNUREADLINE)
     rl_catch_sigwinch = 1;  /* allow readline to respond to resized windows  */
+#endif
+#endif
+}
+
+/* -------------------------------------------------------------------------- */
+/* This is the command processing loop for spice and nutmeg.
+   The function is called even when GNU readline is unavailable, in which
+   case it falls back to repeatable calling cp_evloop()
+   SJB 26th April 2005 */
+static void
+app_rl_readlines(void)
+{
+#if defined(HAVE_GNUREADLINE) || defined(HAVE_BSDEDITLINE)
+    /* GNU Readline Support -- Andrew Veliath <veliaa@rpi.edu> */
+    char *line, *expanded_line;
+
+#ifndef X_DISPLAY_MISSING
+    if (dispdev->Input == X11_Input)
+        rl_event_hook = app_event_func;
 #endif
 
     /* note that we want some mechanism to detect ctrl-D and expand it to exit */
@@ -1091,12 +1100,16 @@ int main(int argc, char **argv)
         cp_nocc = FALSE;
     }
 
+#ifndef HAS_WINGUI
     if ((iflag || istty) && !ft_batchmode) {
         /* Enable interactive prompting. */
-
+#else
+    if (iflag && !ft_batchmode) {
+#endif
         bool x_true = TRUE;
         cp_vset("interactive", CP_BOOL, &x_true);
     }
+
 
     if (ft_servermode) {             /* in server no init file */
         readinit = FALSE;
@@ -1147,7 +1160,11 @@ int main(int argc, char **argv)
     fprintf(stdout, "We are ready to read initialization files.\n");
 #endif
 
-    /* To catch interrupts during .spiceinit... */
+    /* To catch interrupts during .spiceinit... Readline must be initialised
+     * so that it is safe to call ft_sigintr_cleanup();
+     */
+
+    app_rl_init();
     if (SETJMP(jbuf, 1)) {
         ft_sigintr_cleanup();
         fprintf(cp_err, "Warning: error executing .spiceinit.\n");
@@ -1155,9 +1172,23 @@ int main(int argc, char **argv)
     else {
         if (readinit) {
             /* load user's initialisation file
-               try accessing the initialisation file in the current directory
-               if that fails try the alternate name */
+              try accessing the initialisation file .spiceinit in a user provided
+              path read from environmental variable SPICE_USERINIT_DIR,
+              if that fails try the alternate name spice.rc, then look into
+              the current directory, then the HOME directory, then into USERPROFILE */
             do {
+                {
+                    const char* const userinit = getenv("SPICE_USERINIT_DIR");
+                    if (userinit) {
+                        if (read_initialisation_file(userinit, INITSTR) != FALSE) {
+                            break;
+                        }
+                        if (read_initialisation_file(userinit, ALT_INITSTR) != FALSE) {
+                            break;
+                        }
+                    }
+                }
+
                 if (read_initialisation_file("", INITSTR) != FALSE) {
                     break;
                 }
@@ -1322,6 +1353,8 @@ int main(int argc, char **argv)
                 /* Copy the input file name for becoming another file search path */
                 if (inp_spsource(tempfile, FALSE, dname, FALSE) != 0) {
                     fprintf(stderr, "    Simulation interrupted due to error!\n\n");
+                    if (oflag && !cp_getvar("interactive", CP_BOOL, NULL, 0))
+                        exit(EXIT_BAD);
                 }
                 tfree(dname);
                 gotone = TRUE;

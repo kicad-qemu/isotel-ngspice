@@ -77,9 +77,8 @@ static void measure_errMessage(const char *mName, const char *mFunction,
         const char *trigTarg, const char *errMsg, int chk_only)
 {
     if (!chk_only) {
-        printf("\nError: measure  %s  %s(%s) : ", mName, mFunction, trigTarg);
-        printf("%s", errMsg);
-        // printf("\tmeasure '%s'  failed\n", mName);
+        fprintf(stderr, "\nError: measure  %s  %s(%s) : ", mName, mFunction, trigTarg);
+        fprintf(stderr, "%s", errMsg);
     }
 }
 
@@ -468,6 +467,19 @@ com_measure_when(
         /* if analysis ac, sp, suppress values below 0 */
         else if ((ac_check || sp_check) && (scaleValue < 0))
             continue;
+
+        if (dc_check) {
+            /* dc: start from pos or neg scale value */
+            if ((scaleValue < meas->m_from) || (scaleValue > meas->m_to))
+                continue;
+        } else {
+            /* all others: start from neg scale value */
+            if (scaleValue < meas->m_from)
+                continue;
+
+            if ((meas->m_to != 0.0e0) && (scaleValue > meas->m_to))
+                break;
+        }
 
         /* if 'dc': reset first if scale jumps back to origin */
         if ((first > 1) && (dc_check && (meas->m_td == scaleValue)))
@@ -1601,9 +1613,9 @@ get_measure2(
     }
 
     if (wl_cnt < 3) {
-        printf("\tmeasure '%s'  failed\n", mName);
-        printf("Error: measure  %s  :\n", mName);
-        printf("\tinvalid num params\n");
+        fprintf(stderr, "\tmeasure '%s'  failed\n", mName);
+        fprintf(stderr, "Error: measure  %s  :\n", mName);
+        fprintf(stderr, "\tinvalid num params\n");
         tfree(mName);
         tfree(mAnalysis);
         tfree(mFunction);
@@ -1666,6 +1678,13 @@ get_measure2(
             measure_errMessage(mName, mFunction, "TARG", errbuf, autocheck);
             goto err_ret1;
         }
+
+        // If there was a FROM propagate trig<->targ
+
+        if (measTrig->m_from !=0.0 && measTarg->m_from == 0.0)
+            measTarg->m_from = measTrig->m_from;
+        else if (measTarg->m_from !=0.0 && measTrig->m_from == 0.0)
+            measTrig->m_from = measTarg->m_from;
 
         // measure trig
         if (measTrig->m_at == 1e99)
@@ -2021,8 +2040,8 @@ err_ret7:
     case AT_ERR2:
     case AT_ERR3:
     {
-        printf("\nError: measure  %s failed:\n", mName);
-        printf("\tfunction '%s' currently not supported\n\n", mFunction);
+        fprintf(stderr, "\nError: measure  %s failed:\n", mName);
+        fprintf(stderr, "\tfunction '%s' currently not supported\n\n", mFunction);
         tfree(mFunction);
         break;
     }

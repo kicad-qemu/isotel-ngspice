@@ -75,6 +75,7 @@ CDHW*/
 #endif
 
 extern INPmodel *modtab;
+extern bool ft_batchmode;
 
 static struct variable *parmtovar(IFvalue *pv, IFparm *opt);
 static IFparm *parmlookup(IFdevice *dev, GENinstance **inptr, char *param,
@@ -87,7 +88,6 @@ static int finddev(CKTcircuit *ckt, char *name, GENinstance **devptr, GENmodel *
 
 /* espice fix integration */
 static int finddev_special(CKTcircuit *ckt, char *name, GENinstance **devptr, GENmodel **modptr, int *device_or_model);
-
 
 /* Input a single deck, and return a pointer to the circuit. */
 
@@ -166,6 +166,12 @@ if_inpdeck(struct card *deck, INPtables **tab)
 
     /* Scan through the instance lines and parse the circuit. */
     INPpas2(ckt, deck->nextcard, *tab, ft_curckt->ci_defTask);
+#ifdef XSPICE
+    if (!Evtcheck_nodes(ckt, *tab)) {
+        ft_sperror(E_PRIVATE, "Evtcheck_nodes");
+        return NULL;
+    }
+#endif
 
     /* If option cshunt is given, add capacitors to each voltage node */
     INPpas4(ckt, *tab);
@@ -311,7 +317,7 @@ if_run(CKTcircuit *ckt, char *what, wordlist *args, INPtables *tab)
         INPpas2(ckt, &deck, tab, ft_curckt->ci_specTask);
 
         if (deck.error) {
-            fprintf(cp_err, "Warning: %s\n", deck.error);
+            fprintf(cp_err, "Error: %sin   %s\n\n", deck.error, deck.line);
             return 2;
         }
     }
@@ -325,6 +331,13 @@ if_run(CKTcircuit *ckt, char *what, wordlist *args, INPtables *tab)
     if (eq(what, "run")) {
         ft_curckt->ci_curTask = ft_curckt->ci_defTask;
         ft_curckt->ci_curOpt = ft_curckt->ci_defOpt;
+        if (ft_curckt->ci_curTask->jobs == NULL) {
+            /* nothing to 'run' */
+            if (!ft_batchmode) { /* FIXME: This is a hack to re-enable 'make check' */
+                fprintf(stderr, "Warning: No job (tran, ac, op etc.) defined:\n");
+                return (3);
+            }
+        }
     }
 
     /* -- Find out what we are supposed to do.              */
@@ -1620,10 +1633,12 @@ void com_snsave(wordlist *wl)
     TSKtask *task;
 
     if (!ft_curckt) {
-        fprintf(cp_err, "Error: there is no circuit loaded.\n");
+        fprintf(cp_err, "Warning: there is no circuit loaded.\n");
+        fprintf(cp_err, "    Command 'snsave' is ignored.\n");
         return;
     } else if (!ft_curckt->ci_ckt) { /* Set noparse? */
-        fprintf(cp_err, "Error: circuit not parsed.\n");
+        fprintf(cp_err, "Warning: circuit not parsed.\n");
+        fprintf(cp_err, "    Command 'snsave' is ignored.\n");
         return;
     }
 
@@ -1642,7 +1657,7 @@ void com_snsave(wordlist *wl)
     task = ft_curckt->ci_curTask;
 
     if (task->jobs->JOBtype != 4) {
-        fprintf(cp_err, "Only saving of tran analysis is implemented\n");
+        fprintf(cp_err, "Warning: Only saving of tran analysis is implemented\n");
         return;
     }
 

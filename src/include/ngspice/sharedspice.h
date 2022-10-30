@@ -14,7 +14,7 @@ defined in the caller are sent to ngspice.dll.
 
 Callback funtion typedefs
 SendChar       typedef of callback function for reading printf, fprintf, fputs
-SendStat       typedef of callback function for reading status string and precent value
+SendStat       typedef of callback function for reading status string and percent value
 ControlledExit typedef of callback function for tranferring a signal upon
                ngspice controlled_exit to caller. May be used by caller
                to detach ngspice.dll.
@@ -45,6 +45,11 @@ The caller may then directly assess the vector data (but probably should
 not modify them).
 
 ***************** If XSPICE is enabled *************************************
+**
+ngCM_Input_Path(const char*)
+sets the input path for files loaded by code models.
+If NULL is sent, return the current Infile_Path.
+
 **
 ngGet_Evt_NodeInfo(char*)
 receives the name of a event node vector (may be in the form 'vectorname' or
@@ -92,7 +97,7 @@ are of type bool if sharedspice.h is used externally.
 */
 
 #ifndef NGSPICE_PACKAGE_VERSION
-#define NGSPICE_PACKAGE_VERSION "37"
+#define NGSPICE_PACKAGE_VERSION "38"
 #endif
 /* we have NG_BOOL instead of BOOL */
 #ifndef HAS_NG_BOOL
@@ -365,12 +370,16 @@ Commands are executed immediately */
 IMPEXP
 int  ngSpice_Command(char* command);
 
-
 /* get info about a vector */
 IMPEXP
 pvector_info ngGet_Vec_Info(char* vecname);
 
 #ifdef XSPICE
+/* Set the input path for files loaded by code models.
+   If NULL is sent, return the current Infile_Path. */
+IMPEXP
+char* ngCM_Input_Path(const char* path);
+
 /* get info about the event node vector */
 IMPEXP
 pevt_shared_data ngGet_Evt_NodeInfo(char* nodename);

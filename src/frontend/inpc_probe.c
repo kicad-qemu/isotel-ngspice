@@ -47,7 +47,7 @@ void inp_probe(struct card* deck)
     int skip_control = 0;
     int skip_subckt = 0;
     wordlist* probes = NULL, *probeparams = NULL, *wltmp, *allsaves = NULL;
-    bool haveall = FALSE, havedifferential = FALSE, t = TRUE;
+    bool haveall = FALSE, havedifferential = FALSE, t = TRUE, havesave = FALSE;
     NGHASHPTR instances;   /* instance hash table */
     int ee = 0; /* serial number for sources */
 
@@ -61,6 +61,37 @@ void inp_probe(struct card* deck)
     /* no .probe command */
     if (probes == NULL)
         return;
+
+    /* check for '.save' and (in a .control section) 'save'.
+       If not found, add '.save all' */
+    for (card = deck; card; card = card->nextcard) {
+        /* find .save */
+        if (ciprefix(".save", card->line)) {
+            havesave = TRUE;
+            break;
+        }
+        /* exclude any command inside .control ... .endc */
+        else if (ciprefix(".control", card->line)) {
+            skip_control++;
+            continue;
+        }
+        else if (ciprefix(".endc", card->line)) {
+            skip_control--;
+            continue;
+        }
+        else if (skip_control > 0) {
+            if (ciprefix("save ", card->line)) {
+                havesave = TRUE;
+                break;
+            }
+        }
+    }
+    skip_control = 0;
+
+    if (!havesave) {
+        char* vline = copy(".save all");
+        deck = insert_new_line(deck, vline, 0, 0);
+    }
 
     /* set a variable if .probe command is given */
     cp_vset("probe_is_given", CP_BOOL, &t);
@@ -204,10 +235,15 @@ void inp_probe(struct card* deck)
                 continue;
 
             /* select elements not in need of a measure Vsource */
-            if (strchr("evihk", *instname))
+            if (strchr("ehvk", *instname))
                 continue;
 
-            numnodes = get_number_terminals(card->line);
+            /* special treatment for controlled current sources and switches:
+               We have three or four tokens until model name, but only the first 2 are relevant nodes. */
+            if (strchr("fgsw", *instname))
+                numnodes = 2;
+            else
+                numnodes = get_number_terminals(card->line);
 
             char* thisline = curr_line;
             prevcard = card;
@@ -227,7 +263,7 @@ void inp_probe(struct card* deck)
 
                 nodename2 = get_terminal_name(instname, "2", instances);
 
-                char* newnode = tprintf("int_%s_%s", strnode2, instname);
+                char* newnode = tprintf("probe_int_%s_%s", strnode2, instname);
                 char* vline = tprintf("vcurr_%s:%s_%s %s %s 0", instname, nodename2, strnode2, newnode, strnode2);
                 char *newline = tprintf("%s %s %s %s", instname, strnode1, newnode, thisline);
 
@@ -260,7 +296,7 @@ void inp_probe(struct card* deck)
                         tfree(thisnode);
                         continue;
                     }
-                    char* newnode = tprintf("int_%s_%s_%d", thisnode, instname, i);
+                    char* newnode = tprintf("probe_int_%s_%s_%d", thisnode, instname, i);
                     sadd(&dnewline, newnode);
                     cadd(&dnewline, ' ');
                     /* to make the nodes unique */
@@ -679,7 +715,13 @@ void inp_probe(struct card* deck)
                     continue;
                 }
                 char* thisline = tmpcard->line;
-                numnodes = get_number_terminals(thisline);
+
+                /* special treatment for controlled current sources and switches:
+                   We have three or four tokens until model name, but only the first 2 are relevant nodes. */
+                if (strchr("fgsw", *instname))
+                    numnodes = 2;
+                else
+                    numnodes = get_number_terminals(thisline);
 
                 /* skip ',' */
                 if (*tmpstr == ',')
@@ -718,7 +760,7 @@ void inp_probe(struct card* deck)
 
                     nodename2 = get_terminal_name(instname, "2", instances);
 
-                    char* newnode = tprintf("int_%s_%s_2", strnode2, instname);
+                    char* newnode = tprintf("probe_int_%s_%s_2", strnode2, instname);
                     char* vline = tprintf("vcurr_%s:%s_%s %s %s 0", instname, nodename2, strnode2, newnode, strnode2);
                     newline = tprintf("%s %s %s", begstr, newnode, thisline);
 
@@ -774,7 +816,7 @@ void inp_probe(struct card* deck)
 
                     char* strnode1 = gettok(&thisline);
 
-                    char* newnode = tprintf("int_%s_%s_%d", strnode1, instname, nodenum);
+                    char* newnode = tprintf("probe_int_%s_%s_%d", strnode1, instname, nodenum);
 
                     newline = tprintf("%s %s %s", begstr, newnode, thisline);
 
@@ -809,7 +851,14 @@ void inp_probe(struct card* deck)
                     continue;
                 }
                 char* thisline = tmpcard->line;
-                numnodes = get_number_terminals(thisline);
+
+                /* special treatment for controlled current sources and switches:
+                   We have three or four tokens until model name, but only the first 2 are relevant nodes. */
+                if (strchr("fgsw", *instname))
+                    numnodes = 2;
+                else
+                    numnodes = get_number_terminals(thisline);
+
                 int err = 0;
                 /* call fcn with power requested */
                 err = setallvsources(tmpcard, instances, instname, numnodes, haveall, TRUE);
@@ -1194,7 +1243,9 @@ void modprobenames(INPtables* tab) {
    Define a reference voltage of an n-terminal device as Vref = (V(1) + V(2) +...+ V(n)) / n  with terminal (node) voltages V(n).
    Calculate power PQ1 = (v(1) - Vref) * i1 + (V(2) - Vref) * i2 + ... + (V(n) - Vref) * in) with terminal currents in.
    See "Quantities of a Multiterminal Circuit Determined on the Basis of Kirchhoff’s Laws", M. Depenbrock, 
-   ETEP Vol. 8, No. 4, July/August 1998 */
+   ETEP Vol. 8, No. 4, July/August 1998.
+   probe_int_ is used to trigger supressing the vectors when saving the results. Internal vectors thus are
+   not saved. */
 static int setallvsources(struct card *tmpcard, NGHASHPTR instances, char *instname, int numnodes, bool haveall, bool power)
 {
     
@@ -1214,15 +1265,15 @@ static int setallvsources(struct card *tmpcard, NGHASHPTR instances, char *instn
     if (power) {
         /* For example: Bq1Vref q1Vref 0 V = 1/3*( */
         char numbuf[3];
-        cadd(&BVrefline, 'B');
+        sadd(&BVrefline, "Bprobe_int_");
         sadd(&BVrefline, instname);
         sadd(&BVrefline, "Vref ");
         sadd(&BVrefline, instname);
-        sadd(&BVrefline, "Vref 0 V = 1/");
+        sadd(&BVrefline, "probe_int_Vref 0 V = 1/");
         sadd(&BVrefline, itoa10(numnodes, numbuf));
         sadd(&BVrefline, "*(");
         /* For example: Bq1power q1:power 0 V = */
-        cadd(&Bpowerline, 'B');
+        sadd(&Bpowerline, "Bprobe_int_");
         sadd(&Bpowerline, instname);
         sadd(&Bpowerline, "power ");
         sadd(&Bpowerline, instname);
@@ -1253,13 +1304,13 @@ static int setallvsources(struct card *tmpcard, NGHASHPTR instances, char *instn
         }
         char* begstr = copy_substring(tmpcard->line, instline);
         char* strnode1 = gettok(&instline);
-        char* newnode = tprintf("int_%s_%s_%d", strnode1, instname, nodenum);
+        char* newnode = tprintf("probe_int_%s_%s_%d", strnode1, instname, nodenum);
         char nodenumstr[3];
         char *nodename1 = get_terminal_name(instname, itoa10(nodenum, nodenumstr), instances);
 
         newline = tprintf("%s %s %s", begstr, newnode, instline);
 
-        char* vline = tprintf("vcurr_%s:%s:%s_%s %s %s 0", instname, nodename1, nodenumstr, strnode1, strnode1, newnode);
+        char* vline = tprintf("vcurr_%s:probe_int_%s:%s_%s %s %s 0", instname, nodename1, nodenumstr, strnode1, strnode1, newnode);
 
         tfree(tmpcard->line);
         tmpcard->line = newline;
@@ -1267,9 +1318,6 @@ static int setallvsources(struct card *tmpcard, NGHASHPTR instances, char *instn
         card = tmpcard->nextcard;
 
         card = insert_new_line(card, vline, 0, 0);
-
-        char* nodesaves = tprintf("%s:%s#branch", instname, nodename1);
-        allsaves = wl_cons(nodesaves, allsaves);
 
         if (power) {
             /* For example V(1)+V(2)+V(3)*/
@@ -1279,7 +1327,7 @@ static int setallvsources(struct card *tmpcard, NGHASHPTR instances, char *instn
                sadd(&BVrefline, "+V(");
             sadd(&BVrefline, newnode);
             cadd(&BVrefline, ')');
-            /*For example: (V(node1)-V(q1Vref))*node1#branch+(V(node2)-V(q1Vref))*node2#branch */
+            /*For example: (V(node1)-V(q1probe_int_Vref))*node1#branch+(V(node2)-V(q1Vref))*node2#branch */
             if (nodenum == 1)
                sadd(&Bpowerline, "(V(");
             else
@@ -1287,9 +1335,9 @@ static int setallvsources(struct card *tmpcard, NGHASHPTR instances, char *instn
             sadd(&Bpowerline, newnode);
             sadd(&Bpowerline, ")-V(");
             sadd(&Bpowerline, instname);
-            sadd(&Bpowerline, "Vref))*i(vcurr_");
+            sadd(&Bpowerline, "probe_int_Vref))*i(vcurr_");
             sadd(&Bpowerline, instname);
-            cadd(&Bpowerline, ':');
+            sadd(&Bpowerline, ":probe_int_");
             sadd(&Bpowerline, nodename1);
             cadd(&Bpowerline, ':');
             sadd(&Bpowerline, nodenumstr);

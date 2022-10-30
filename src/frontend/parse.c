@@ -4,6 +4,7 @@ Author: 1985 Wayne A. Christopher, U. C. Berkeley CAD Group
 **********/
 
 /*
+ * Control language parser:
  * A simple operator-precedence parser for algebraic expressions.
  * This also handles relational and logical expressions.
  */
@@ -43,7 +44,7 @@ struct pnode *ft_getpnames_from_string(const char *sz, bool check)
      * structure must also be freed if the check fails since it is not
      * being returned. */
     if (check && !checkvalid(pn)) {
-        dvec_free(pn->pn_value);
+        vec_free_x(pn->pn_value);
         free_pnode(pn);
         return (struct pnode *) NULL;
     }
@@ -245,11 +246,11 @@ checkvalid(struct pnode *pn)
                 !eq(pn->pn_value->v_name, "list")) {
                 if (eq(pn->pn_value->v_name, "all"))
                     fprintf(cp_err,
-                            "Error: %s: no matching vectors.\n",
+                            "Warning from checkvalid: %s: no matching vectors.\n",
                             pn->pn_value->v_name);
                 else
                     fprintf(cp_err,
-                            "Error(checkvalid): vector %s is not available or has zero length.\n",
+                            "Warning from checkvalid: vector %s is not available or has zero length.\n",
                             pn->pn_value->v_name);
                 return (FALSE);
             }
@@ -885,7 +886,7 @@ int PPlex(YYSTYPE *lvalp, struct PPltype *llocp, char **line)
              *   vthing#branch
              *   i(vthing)
              */
-            for (; *sbuf && !strchr(specials, *sbuf); sbuf++)
+            for (; *sbuf && !strchr(specials, *sbuf); sbuf++) {
                 if (*sbuf == '@') {
                     atsign = 1;
                 }
@@ -897,16 +898,22 @@ int PPlex(YYSTYPE *lvalp, struct PPltype *llocp, char **line)
                         sbuf++;
                     }
                     break;
-                }
-            /* keep the identifier i(vss) as a single token, even as dc1.i(vss) */
-                else if (prefix("i(v", sbuf)) {
+                } else if ((sbuf == start || sbuf[-1] == '.') &&
+                           prefix("i(v", sbuf)) {
+                    /* Special case for current through voltage source:
+                     * keep the identifier i(vss) as a single token,
+                     * even as dc1.i(vss).
+                     */
+
                     if (get_r_paren(&sbuf) == 1) {
-                        fprintf(stderr, "Error: missing ')' in token\n    %s\n", start);
+                        fprintf(stderr,
+                                "Error: missing ')' in token\n    %s\n",
+                                start);
                         break;
                     }
-                    sbuf--;
+                    sbuf--; // Point at ')', last accepted char.
                 }
-
+            }
             lvalp->str = copy_substring(start, sbuf);
             lexer_return(TOK_STR, 0);
         }

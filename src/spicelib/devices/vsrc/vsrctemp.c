@@ -41,16 +41,26 @@ VSRCtemp(GENmodel *inModel, CKTcircuit *ckt)
             if(here->VSRCacGiven && !here->VSRCacPGiven) {
                 here->VSRCacPhase = 0;
             }
-            if(!here->VSRCdcGiven) {
-                /* no DC value - either have a transient value, or none */
-                if(here->VSRCfuncTGiven) {
-                    SPfrontEnd->IFerrorf (ERR_WARNING,
-                            "%s: no DC value, transient time 0 value used",
-                            here->VSRCname);
-                } else {
-                    SPfrontEnd->IFerrorf (ERR_WARNING,
-                            "%s: has no value, DC 0 assumed",
-                            here->VSRCname);
+            if (!here->VSRCdcGiven && !here->VSRCfuncTGiven) {
+                /* no DC value, no transient value */
+                SPfrontEnd->IFerrorf(ERR_INFO,
+                    "%s: has no value, DC 0 assumed",
+                    here->VSRCname);
+            }
+            else if (here->VSRCdcGiven && here->VSRCfuncTGiven
+                     && here->VSRCfunctionType != TRNOISE && here->VSRCfunctionType != TRRANDOM) {
+                /* DC value and transient time 0 values given */
+                double time0value;
+                /* determine transient time 0 value */
+                if (here->VSRCfunctionType == AM || here->VSRCfunctionType == PWL)
+                    time0value = here->VSRCcoeffs[1];
+                else
+                    time0value = here->VSRCcoeffs[0];
+                /* No warning issued if DC value and transient time 0 value are the same */
+                if (!AlmostEqualUlps(time0value, here->VSRCdcValue, 3)) {
+                    SPfrontEnd->IFerrorf(ERR_INFO,
+                        "%s: dc value used for op instead of transient time=0 value.",
+                        here->VSRCname);
                 }
             }
             radians = here->VSRCacPhase * M_PI / 180.0;

@@ -43,13 +43,6 @@ Author: 1985 Wayne A. Christopher
 #include "ngspice/randnumb.h"
 #include "ngspice/compatmode.h"
 
-#define line_free(line, flag)                   \
-    do {                                        \
-        line_free_x(line, flag);                \
-        line = NULL;                            \
-    } while(0)
-
-
 static struct card *com_options = NULL;
 static struct card *mc_deck = NULL;
 static struct card *recent_deck = NULL;
@@ -61,7 +54,6 @@ static void dotifeval(struct card *deck);
 static void eval_agauss(struct card *deck, char *fcn);
 static wordlist *inp_savecurrents(struct card *deck, struct card *options,
         wordlist *wl, wordlist *controls);
-void line_free_x(struct card *deck, bool recurse);
 static void recifeval(struct card *pdeck);
 static char *upper(register char *string);
 static void rem_unused_mos_models(struct card* deck);
@@ -188,6 +180,9 @@ com_listing(wordlist *wl)
             inp_list(cp_out,
                      expand ? ft_curckt->ci_deck : ft_curckt->ci_origdeck,
                      ft_curckt->ci_options, type);
+            if (expand && ft_curckt->ci_auto && type != LS_RUNNABLE)
+                inp_list(cp_out, ft_curckt->ci_auto,
+                         ft_curckt->ci_options, type);
         }
     } else {
         fprintf(cp_err, "Error: no circuit loaded.\n");
@@ -760,15 +755,6 @@ inp_spsource(FILE *fp, bool comfile, char *filename, bool intfile)
             endTime = seconds();
             loadTime = endTime - startTime;
             startTime = endTime;
-            /*This is for the globel param setting only */
-            /* replace agauss(x,y,z) in each b-line by suitable value, one for all */
-            bool statlocal = cp_getvar("statlocal", CP_BOOL, NULL, 0);
-            if (!statlocal) {
-                static char *statfcn[] = {"agauss", "gauss", "aunif", "unif", "limit"};
-                int ii;
-                for (ii = 0; ii < 5; ii++)
-                    eval_agauss(deck, statfcn[ii]);
-            }
 
             /* If we have large PDK deck, search for scale option and set 
             the variable 'scale'*/
@@ -840,6 +826,15 @@ inp_spsource(FILE *fp, bool comfile, char *filename, bool intfile)
                     return 1;
                 }
 
+            /* replace agauss(x,y,z) in each b-line by suitable value, one for all */
+            bool statlocal = cp_getvar("statlocal", CP_BOOL, NULL, 0);
+            if (!statlocal) {
+                static char* statfcn[] = { "agauss", "gauss", "aunif", "unif", "limit" };
+                int ii;
+                for (ii = 0; ii < 5; ii++)
+                    eval_agauss(deck, statfcn[ii]);
+            }
+
             /* Scan the deck again, now also adding .save commands to wl_first */
             for (dd = deck->nextcard; dd; dd = dd->nextcard) {
                 char* curr_line = dd->line;
@@ -882,6 +877,10 @@ inp_spsource(FILE *fp, bool comfile, char *filename, bool intfile)
                 else
                     fprintf(stderr, "Warning: Cannot open file debug-out2.txt for saving debug info\n");
             }
+
+            /* handle .if ... .elseif ... .else ... .endif statements. */
+            dotifeval(deck);
+
             for (dd = deck; dd; dd = dd->nextcard) {
                 /* get csparams and create vectors, being
                    available in .control section, in plot 'const' */
@@ -901,9 +900,6 @@ inp_spsource(FILE *fp, bool comfile, char *filename, bool intfile)
                     wl_free(wlist);
                 }
             }
-
-            /* handle .if ... .elseif ... .else ... .endif statements. */
-            dotifeval(deck);
 
             /* merge the two option line structs
                com_options (comfile == TRUE, filled in from spinit, .spiceinit, and *ng_sript), and
@@ -1309,10 +1305,10 @@ inp_dodeck(
 
                 if (p == dd->error) {
                     if (strstr(dd->line, ".model"))
-                        out_printf("Warning: Model issue on line %d :\n  %.*s ...\n%s\n",
+                        fprintf(stderr, "Warning: Model issue on line %d :\n  %.*s ...\n%s\n",
                                    dd->linenum_orig, 72, dd->line, dd->error);
                     else {
-                        out_printf("Error on line %d or its substitute:\n  %s\n%s\n",
+                        fprintf(stderr, "Error on line %d or its substitute:\n  %s\n%s\n",
                                    dd->linenum_orig, dd->line, dd->error);
                         have_err = TRUE;
                         return 1;
@@ -1737,7 +1733,10 @@ com_source(wordlist *wl)
 #ifdef SHARED_MODULE
             controlled_exit(1);
 #else
-            cp_evloop(NULL);
+            if (cp_getvar("interactive", CP_BOOL, NULL, 0))
+                cp_evloop(NULL);
+            else
+                controlled_exit(1);
 #endif
         }
         while (wl) {
@@ -1752,7 +1751,10 @@ com_source(wordlist *wl)
 #ifdef SHARED_MODULE
                 controlled_exit(1);
 #else
-                cp_evloop(NULL);
+                if (cp_getvar("interactive", CP_BOOL, NULL, 0))
+                    cp_evloop(NULL);
+                else
+                    controlled_exit(1);
 #endif
             }
             while ((n = fread(buf, 1, BSIZE_SP, tp)) > 0)
@@ -1774,7 +1776,10 @@ com_source(wordlist *wl)
 #ifdef SHARED_MODULE
         controlled_exit(1);
 #else
-        cp_evloop(NULL);
+        if (cp_getvar("interactive", CP_BOOL, NULL, 0))
+            cp_evloop(NULL);
+        else
+            controlled_exit(1);
 #endif
         return;
     }
@@ -1873,8 +1878,12 @@ void create_circbyline(char *line, bool reset, bool lastline)
         circarray = TREALLOC(char *, circarray, n_elem_alloc);
     }
 
-    /* Remove any leading whitespace by shifting */
     char *p_src = skip_ws(line);
+    /* An empty line may have been received. Skip it. */
+    if (*p_src == '\0') {
+        return;
+    }
+    /* Remove any leading whitespace by shifting */
     if (p_src != line) {
         char *p_dst = line;
         char ch_cur;
@@ -1885,7 +1894,7 @@ void create_circbyline(char *line, bool reset, bool lastline)
     }
     if (ft_ngdebug) {
         if (linec == 0)
-            fprintf(stdout, "**** circbyline: circuit netlist sent to shared ngspice ****\n");
+            fprintf(stdout, "**** circuit array: circuit netlist sent to shared ngspice ****\n");
         fprintf(stdout, "%d   %s\n", linec, line);
     }
     circarray[linec++] = line; /* add card to deck */
@@ -1894,7 +1903,7 @@ void create_circbyline(char *line, bool reset, bool lastline)
      * free the deck. The card allocations themselves will be freed
      * elsewhere */
     if (ciprefix(".end", line) && (line[4] == '\0' || isspace_c(line[4]))) {
-        circarray[linec] = NULL; /* termiante the deck */
+        circarray[linec] = NULL; /* terminate the deck */
         inp_spsource((FILE *) NULL, FALSE, NULL, TRUE); /* process */
         tfree(circarray); /* set to empty */
         linec = 0;
@@ -2247,7 +2256,17 @@ inp_savecurrents(struct card *deck, struct card *options, wordlist *wl, wordlist
         switch (devline[0]) {
         case 'm':
             devname = gettok(&devline);
-            newline = tprintf(".save @%s[id] @%s[is] @%s[ig] @%s[ib]",
+            if (strstr(options->line, "savecurrents_bsim3"))
+                newline = tprintf(".save @%s[id] @%s[ibd] @%s[ibs]",
+                              devname, devname, devname);
+            else if (strstr(options->line, "savecurrents_bsim4"))
+                newline = tprintf(".save @%s[id] @%s[ibd] @%s[ibs] @%s[isub] @%s[igidl] @%s[igisl] @%s[igs] @%s[igb] @%s[igd] @%s[igcs] @%s[igcd]",
+                              devname, devname, devname, devname, devname, devname, devname, devname, devname, devname, devname);
+            else if (strstr(options->line, "savecurrents_mos1"))
+                newline = tprintf(".save @%s[id] @%s[is] @%s[ig] @%s[ib] @%s[ibd] @%s[ibs]",
+                              devname, devname, devname, devname, devname, devname);
+            else
+                newline = tprintf(".save @%s[id] @%s[is] @%s[ig] @%s[ib]",
                               devname, devname, devname, devname);
             break;
         case 'j':
@@ -2351,7 +2370,7 @@ eval_agauss(struct card *deck, char *fcn)
     double x, y, z, val;
     int skip_control = 0;
 
-    card = deck;
+    card = deck->nextcard; /* skip title line */
     for (; card; card = card->nextcard) {
 
         char *ap, *curr_line = card->line;
@@ -2375,7 +2394,7 @@ eval_agauss(struct card *deck, char *fcn)
         while ((ap = search_identifier(curr_line, fcn, curr_line)) != NULL) {
             char *lparen, *begstr, *contstr = NULL, *new_line, *midstr;
             char *tmp1str, *tmp2str, *delstr;
-            int nerror;
+            int nerror = 0;
 
             begstr = copy_substring(curr_line, ap);
             lparen = strchr(ap, '(');
@@ -2383,21 +2402,21 @@ eval_agauss(struct card *deck, char *fcn)
             if (lparen + 1)
                 contstr = copy(lparen + 1);
             tmp1str++; /* skip '(' */
-            /* find the parameters */
-            delstr = tmp2str = gettok(&tmp1str);
+            /* find the parameters, ignore ( ) , */
+            delstr = tmp2str = gettok_np(&tmp1str);
             x = INPevaluate(&tmp2str, &nerror, 1);
             tfree(delstr);
-            delstr = tmp2str = gettok(&tmp1str);
+            delstr = tmp2str = gettok_np(&tmp1str);
             y = INPevaluate(&tmp2str, &nerror, 1);
             tfree(delstr);
             if (cieq(fcn, "agauss")) {
-                delstr = tmp2str = gettok(&tmp1str);
+                delstr = tmp2str = gettok_np(&tmp1str);
                 z = INPevaluate(&tmp2str, &nerror, 1);
                 tfree(delstr);
                 val = agauss(x, y, z);
             }
             else if (cieq(fcn, "gauss")) {
-                delstr = tmp2str = gettok(&tmp1str);
+                delstr = tmp2str = gettok_np(&tmp1str);
                 z = INPevaluate(&tmp2str, &nerror, 1);
                 tfree(delstr);
                 val = gauss(x, y, z);

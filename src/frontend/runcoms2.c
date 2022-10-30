@@ -174,7 +174,8 @@ com_rset(wordlist *wl)
     NG_IGNORE(wl);
 
     if (ft_curckt == NULL) {
-        fprintf(cp_err, "Error: there is no circuit loaded.\n");
+        fprintf(cp_err, "Warning: there is no circuit loaded.\n");
+        fprintf(cp_err, "    Command 'reset' is ignored.\n");
         return;
     }
     com_remcirc(NULL);
@@ -193,7 +194,8 @@ com_remcirc(wordlist *wl)
     NG_IGNORE(wl);
 
     if (ft_curckt == NULL) {
-        fprintf(cp_err, "Error: there is no circuit loaded.\n");
+        fprintf(cp_err, "Warning: there is no circuit loaded.\n");
+        fprintf(cp_err, "    Command 'remcirc' is ignored.\n");
         return;
     }
 
@@ -232,6 +234,8 @@ com_remcirc(wordlist *wl)
     dd = ft_curckt->ci_options;
     line_free(dd, TRUE);
     dd = ft_curckt->ci_meas;
+    line_free(dd, TRUE);
+    dd = ft_curckt->ci_auto;
     line_free(dd, TRUE);
 
     wl_free(ft_curckt->ci_commands);

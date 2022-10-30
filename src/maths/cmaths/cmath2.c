@@ -3,17 +3,20 @@ Copyright 1990 Regents of the University of California.  All rights reserved.
 Author: 1985 Wayne A. Christopher, U. C. Berkeley CAD Group
 **********/
 
-/*
- * Routines to do complex mathematical functions. These routines require
- * the -lm libraries. We sacrifice a lot of space to be able
- * to avoid having to do a seperate call for every vector element,
- * but it pays off in time savings.  These routines should never
- * allow FPE's to happen.
- *
- * Complex functions are called as follows:
- *  cx_something(data, type, length, &newlength, &newtype),
- *  and return a char * that is cast to complex or double.
- */
+/** \file cmath2.c
+    \brief functions for the control language parser: norm, uminus, rnd, sunif, sgauss, poisson, exponential, mean, stddev, length, vector, unitvec, plus, minus, times, mod, max, min, d, avg, floor, ceil, nint
+
+    Routines to do complex mathematical functions. These routines require
+    the -lm libraries. We sacrifice a lot of space to be able
+    to avoid having to do a seperate call for every vector element,
+    but it pays off in time savings.  These routines should never
+    allow FPE's to happen.
+
+    Complex functions are called as follows:
+     cx_something(data, type, length, &newlength, &newtype),
+     and return a char * that is cast to complex or double.
+*/
+
 
 #include "ngspice/ngspice.h"
 #include "ngspice/cpdefs.h"
@@ -535,7 +538,7 @@ cx_unitvec(void *data, short int type, int length, int *newlength, short int *ne
  *  cx_something(data1, data2, datatype1, datatype2, length)
  *
  * The length of the two data vectors is always the same, and is the length
- * of the result. The result type is complex iff one of the args is
+ * of the result. The result type is complex if one of the args is
  * complex.
  */
 
