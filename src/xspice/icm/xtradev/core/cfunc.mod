@@ -20,7 +20,8 @@ MODIFICATIONS
 
     24 Apr 1991    Jeffrey P. Murray
     26 Sep 1991    Jeffrey P. Murray
-    27 Sep 2020    Uros Platise
+    27 Sep 2020    Uros Platise, single term dipole
+    30 oct 2022    Uros Platise, extended to n-term dipole solution with air
 
 
 SUMMARY
@@ -178,25 +179,25 @@ NON-STANDARD FEATURES
 /*                                                                 */
 /*                         Platise Mode                            */
 /*                                                                 */
-/*     In Platise mode, the core model is described by two params  */
-/*  only, the saturation point Bs [T] and magnetic dipole momentum */
-/*  Hm [A/m], which field strength can be read at 0.71 Bs from the */
-/*  data-sheet.                                                    */
+/*     In Platise mode, the core model is described by N dipols,   */
+/*  their saturation point Bs [T] and magnetic dipole momentum     */
+/*  Hm [A/m].                                                      */
 /*                                                                 */
-/*  Bs and Hm are given as first parameters within the b_array and */
-/*  h_array. The rest of the fields are ignored in this mode.      */
+/*  Bs and Hm are given as parameters within the b_array and       */
+/*  h_array. Typically one or two terms (dipoles) suffice.         */
 /*  This mode is automatically selected when arrays contain single */
-/*  elements (Bs and Hm).                                          */
+/*  dipol element (Bs and Hm).                                     */
 /*                                                                 */
 /*  It provides smooth function with continuous derivative.        */
-/*  This model does not (yet) include hysteresis.                  */
+/*  Platise model does not (yet) include hysteresis.               */
 /*                                                                 */
-/*  Last modified: 9/27/2020                                       */
+/*  Last modified: 10/30/2022                                      */
 /*******************************************************************/
 
 void
 cm_core(ARGS)
 {
+    const double u0 = 1.2566370614359173e-06;
 
     /*** The following declarations pertain to PWL mode ***/
 
@@ -272,10 +273,9 @@ cm_core(ARGS)
         /* Retrieve frequently used parameters... */
 
         input_domain = PARAM(input_domain);
-        area = PARAM(area);
+        area   = PARAM(area);
         length = PARAM(length);
-
-        size = PARAM_SIZE(H_array);
+        size   = PARAM_SIZE(H_array);
 
         H = (Mif_Value_t*) &PARAM(H_array[0]);
         B = (Mif_Value_t*) &PARAM(B_array[0]);
@@ -295,16 +295,23 @@ cm_core(ARGS)
         /* Calculate H_input value from mmf_input... */
         H_input = mmf_input / length;
 
-            /* Platise model based on B_sat in B[0] and dipol H_momentum in H[0]*/
+            /* Platise model based on B_sat in B[] and dipols H_momentum in H[]*/
 
         if (size == 1 || mode == PLATISE) {
-            double H2       = H_input*H_input;
-            double Hm2      = H[0].rvalue*H[0].rvalue;
-            double HHm2     = H2 + Hm2;
-            double HHm2sqrt = sqrt( HHm2 );
+            double H2 = H_input*H_input;
+            dout_din  = 0;
+            B_out     = 0;
 
-            dout_din = B[0].rvalue * Hm2 * HHm2sqrt / (HHm2 * HHm2);
-            B_out    = B[0].rvalue * H_input / HHm2sqrt;
+            for (i = 0; i < size; i++) {
+                double Hm2      = H[i].rvalue*H[i].rvalue;
+                double HHm2     = H2 + Hm2;
+                double HHm2sqrt = sqrt( HHm2 );
+
+                dout_din += B[i].rvalue * Hm2 * HHm2sqrt / (HHm2 * HHm2);
+                B_out    += B[i].rvalue / HHm2sqrt;     // ommit H_input here to save one mul
+            }
+            dout_din += u0;
+            B_out     = H_input * (B_out + u0);
         }
             /* Determine segment boundaries within which H_input resides */
 

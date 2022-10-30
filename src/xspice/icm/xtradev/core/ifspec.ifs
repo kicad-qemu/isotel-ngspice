@@ -89,7 +89,7 @@ Null_Allowed:      yes
 PARAMETER_TABLE:
 
 Parameter_Name:    mode
-Description:       "mode switch (1 = pwl, 2 = hyst, 3 = platise (auto))"
+Description:       "mode switch (1 = pwl, 2 = hyst, 3 = platise (auto for single dipole))"
 Data_Type:         int
 Default_Value:     1
 Limits:            [1 3]
