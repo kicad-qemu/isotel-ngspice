@@ -4,7 +4,7 @@ Author: 1987 Wayne A. Christopher, U. C. Berkeley CAD Group
 **********/
 
 /*
- * All the functions used in the parse tree.  These functions return HUGE
+ * All the functions used in the B-source parse tree.  These functions return HUGE
  * if their argument is out of range.
  */
 
@@ -13,11 +13,9 @@ Author: 1987 Wayne A. Christopher, U. C. Berkeley CAD Group
 #include "ngspice/fteext.h"
 #include "ngspice/ifsim.h"
 #include "ngspice/inpptree.h"
+#include "ngspice/cktdefs.h"
 #include "inpxx.h"
 #include "ngspice/compatmode.h"
-
-/* XXX These should be in math.h */
-
 
 double PTfudge_factor;
 
@@ -77,8 +75,8 @@ PTpower(double arg1, double arg2)
         else {
             /* If arg2 is quasi an integer, round it to have pow not fail
                when arg1 is negative. Takes into account the double 
-               representation which sometimes differs in the last digit. */
-            if (AlmostEqualUlps(trunc(arg2), arg2, 3))
+               representation which sometimes differs in the last digit(s). */
+            if (AlmostEqualUlps(nearbyint(arg2), arg2, 10))
                 res = pow(arg1, round(arg2));
             else
                 /* As per LTSPICE specification for ** */
@@ -89,6 +87,42 @@ PTpower(double arg1, double arg2)
         res = pow(fabs(arg1), arg2);
     return res;
 }
+
+double
+PTpowerH(double arg1, double arg2)
+{
+    double res;
+
+    if (newcompat.hs) {
+        if (arg1 < 0)
+            res = pow(arg1, round(arg2));
+        else if (arg1 == 0){
+            res = 0;
+        }
+        else
+        {
+            res = pow(arg1, arg2);
+        }
+    }
+    else if (newcompat.lt) {
+        if (arg1 >= 0)
+            res = pow(arg1, arg2);
+        else {
+            /* If arg2 is quasi an integer, round it to have pow not fail
+               when arg1 is negative. Takes into account the double
+               representation which sometimes differs in the last digit(s). */
+            if (AlmostEqualUlps(nearbyint(arg2), arg2, 10))
+                res = pow(arg1, round(arg2));
+            else
+                /* As per LTSPICE specification for ** */
+                res = 0;
+        }
+    }
+    else
+        res = pow(fabs(arg1), arg2);
+    return res;
+}
+
 
 double
 PTpwr(double arg1, double arg2)
@@ -377,4 +411,56 @@ PTnint(double arg1)
      *   rely on default rounding mode of IEEE 754 to do so
      */
     return nearbyint(arg1);
+}
+
+
+/* Calculate the derivative during a transient simulation.
+   If time == 0, return 0.
+   If not transient sim, return 0.
+   The derivative is then (y2-y1)/(t2-t1).
+   */
+double
+PTddt(double arg, void* data)
+{
+    struct ddtdata { int n; double* vals; } *thing = (struct ddtdata*)data;
+    double y, time;
+
+    CKTcircuit* ckt = ft_curckt->ci_ckt;
+
+    time = ckt->CKTtime;
+
+    if (time == 0) {
+        thing->vals[3] = arg;
+        return 0;
+    }
+
+    if (!(ckt->CKTmode & MODETRAN))
+        return 0;
+
+    if (time > thing->vals[0]) {
+        thing->vals[4] = thing->vals[2];
+        thing->vals[5] = thing->vals[3];
+        thing->vals[2] = thing->vals[0];
+        thing->vals[3] = thing->vals[1];
+        thing->vals[0] = time;
+        thing->vals[1] = arg;
+
+/*      // Some less effective smoothing option
+        if (thing->vals[2] > 0) {
+            thing->vals[6] = 0.5 * ((arg - thing->vals[3]) / (time - thing->vals[2]) + thing->vals[6]);
+        }
+*/
+        if (thing->n > 1) {
+            thing->vals[6] = (thing->vals[1] - thing->vals[3]) / (thing->vals[2] - thing->vals[4]);
+        }
+        else {
+            thing->vals[6] = 0;
+            thing->vals[3] = arg;
+        }
+        thing->n += 1;
+    }
+
+    y = thing->vals[6];
+
+    return y;
 }

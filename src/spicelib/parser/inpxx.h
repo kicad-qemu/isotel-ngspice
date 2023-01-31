@@ -20,7 +20,9 @@ void INP2J(CKTcircuit *ckt, INPtables *tab, struct card *current);
 void INP2K(CKTcircuit *ckt, INPtables *tab, struct card *current);
 void INP2L(CKTcircuit *ckt, INPtables *tab, struct card *current);
 void INP2M(CKTcircuit *ckt, INPtables *tab, struct card *current);
+#ifdef OSDI
 void INP2N(CKTcircuit *ckt, INPtables *tab, struct card *current);
+#endif
 void INP2O(CKTcircuit *ckt, INPtables *tab, struct card *current);
 void INP2P(CKTcircuit *ckt, INPtables *tab, struct card *current);
 void INP2Q(CKTcircuit *ckt, INPtables *tab, struct card *current, CKTnode *gnode);
@@ -43,6 +45,7 @@ double PTminus(double arg1, double arg2);
 double PTtimes(double arg1, double arg2);
 double PTdivide(double arg1, double arg2);
 double PTpower(double arg1, double arg2);
+double PTpowerH(double arg1, double arg2);
 double PTpwr(double arg1, double arg2);
 double PTacos(double arg);
 double PTacosh(double arg);
@@ -77,5 +80,6 @@ double PTle0(double arg);
 double PTceil(double arg);
 double PTfloor(double arg);
 double PTnint(double arg);
+double PTddt(double arg, void* data);
 
 #endif

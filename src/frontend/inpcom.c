@@ -11,6 +11,7 @@ Author: 1985 Wayne A. Christopher
 
 /* Note: Must include shlwapi.h before ngspice header defining BOOL due
  * to conflict */
+#include <stdio.h>
 #ifdef _WIN32
 #include <shlwapi.h> /* for definition of PathIsRelativeA() */
 #pragma comment(lib, "Shlwapi.lib")
@@ -606,18 +607,19 @@ static char *cat2strings(char *s1, char *s2, bool spa)
     else if (s1 == NULL || *s1 == '\0') {
         return copy(s2);
     }
-    size_t lges = strlen(s1) + strlen(s2) + 2;
-    char *nextstr;
-    char *strsum = TMALLOC(char, lges);
+    size_t l1 = strlen(s1);
+    size_t l2 = strlen(s2);
+    char *strsum = TMALLOC(char, l1 + l2 + 2);
     if (spa) {
-        nextstr = memccpy(strsum, s1, '\0', lges);
-        *(nextstr - 1) = ' ';
-        nextstr = memccpy(nextstr, s2, '\0', lges);
+        memcpy(strsum, s1, l1);
+        memcpy(strsum + l1 + 1, s2, l2);
+        strsum[l1] = ' ';
+        strsum[l1 + l2 + 1] = '\0';
     }
     else {
-        nextstr = (char*)memccpy(strsum, s1, '\0', lges) - 1;
-        nextstr = (char*)memccpy(nextstr, s2, '\0', lges) - 1;
-        *nextstr = '\0';
+        memcpy(strsum, s1, l1);
+        memcpy(strsum + l1, s2, l2);
+        strsum[l1 + l2] = '\0';
     }
     return strsum;
 }
@@ -773,7 +775,7 @@ char *find_back_assignment(const char *p, const char *start)
 
 /* Set a compatibility flag.
 Currently available are flags for:
-- LTSPICE, HSPICE, Spice3, PSPICE, KiCad, Spectre
+- LTSPICE, HSPICE, Spice3, PSPICE, KiCad, Spectre, XSPICE
 */
 struct compat newcompat;
 static void set_compat_mode(void)
@@ -781,6 +783,7 @@ static void set_compat_mode(void)
     char behaviour[80];
     newcompat.hs = FALSE;
     newcompat.ps = FALSE;
+    newcompat.xs = FALSE;
     newcompat.lt = FALSE;
     newcompat.ki = FALSE;
     newcompat.a = FALSE;
@@ -793,6 +796,8 @@ static void set_compat_mode(void)
             newcompat.isset = newcompat.hs = TRUE; /*HSPICE*/
         if (strstr(behaviour, "ps"))
             newcompat.isset = newcompat.ps = TRUE; /*PSPICE*/
+        if (strstr(behaviour, "xs"))
+            newcompat.isset = newcompat.xs = TRUE; /*XSPICE*/
         if (strstr(behaviour, "lt"))
             newcompat.isset = newcompat.lt = TRUE; /*LTSPICE*/
         if (strstr(behaviour, "ki"))
@@ -820,7 +825,7 @@ static void set_compat_mode(void)
     }
     /* reset everything for 'make check' */
     if (newcompat.mc)
-        newcompat.eg = newcompat.hs = newcompat.spe = newcompat.ps = 
+        newcompat.eg = newcompat.hs = newcompat.spe = newcompat.ps = newcompat.xs = 
         newcompat.ll = newcompat.lt = newcompat.ki = newcompat.a = FALSE;
 }
 
@@ -835,6 +840,8 @@ static void print_compat_mode(void) {
             fprintf(stdout, " hs");
         if (newcompat.ps)
             fprintf(stdout, " ps");
+        if (newcompat.xs)
+            fprintf(stdout, " xs");
         if (newcompat.lt)
             fprintf(stdout, " lt");
         if (newcompat.ki)
@@ -1273,6 +1280,7 @@ struct inp_read_t inp_read( FILE *fp, int call_depth, const char *dir_name,
                     strcat(buffer, "\n");
                 }
                 else { /* No good way to report this so just die */
+                    fprintf(stderr, "Error: IPC status not o.k.\n");
                     controlled_exit(EXIT_FAILURE);
                 }
             }
@@ -1556,6 +1564,8 @@ struct inp_read_t inp_read( FILE *fp, int call_depth, const char *dir_name,
                     !ciprefix("wrdata", buffer) &&
                     !ciprefix(".lib", buffer) && !ciprefix(".inc", buffer) &&
                     !ciprefix("codemodel", buffer) &&
+                    !ciprefix("osdi", buffer) &&
+                    !ciprefix("pre_osdi", buffer) &&
                     !ciprefix("echo", buffer) && !ciprefix("shell", buffer) &&
                     !ciprefix("source", buffer) && !ciprefix("cd ", buffer) &&
                     !ciprefix("load", buffer) && !ciprefix("setcs", buffer)) {
@@ -1759,7 +1769,7 @@ static char *inp_pathresolve(const char *name)
             name[2] == DIR_TERM_LINUX) {
         DS_CREATE(ds, 100);
         if (ds_cat_str(&ds, name) != 0) {
-            fprintf(stderr, "Unable to copy string while resolving path");
+            fprintf(stderr, "Error: Unable to copy string while resolving path");
             controlled_exit(EXIT_FAILURE);
         }
         char *const buf = ds_get_buf(&ds);
@@ -1822,7 +1832,7 @@ static char *inp_pathresolve(const char *name)
 
             if (rc_ds != 0) { /* unable to build string */
                 (void) fprintf(cp_err,
-                        "Unable to build path name in inp_pathresolve");
+                        "Error: Unable to build path name in inp_pathresolve");
                 controlled_exit(EXIT_FAILURE);
             }
 
@@ -1874,7 +1884,7 @@ static char *inp_pathresolve_at(const char *name, const char *dir)
         DS_CREATE(ds, 100);
         if (ds_cat_printf(&ds, ".%c%s", DIR_TERM, name) != 0) {
             (void) fprintf(cp_err,
-                    "Unable to build \".\" path name in inp_pathresolve_at");
+                    "Error: Unable to build \".\" path name in inp_pathresolve_at");
             controlled_exit(EXIT_FAILURE);
         }
         char * const r = inp_pathresolve(ds_get_buf(&ds));
@@ -1902,7 +1912,7 @@ static char *inp_pathresolve_at(const char *name, const char *dir)
         rc_ds |= ds_cat_str(&ds, name); /* append the file name */
 
         if (rc_ds != 0) {
-            (void) fprintf(cp_err, "Unable to build \"dir\" path name "
+            (void) fprintf(cp_err, "Error: Unable to build \"dir\" path name "
                     "in inp_pathresolve_at");
             controlled_exit(EXIT_FAILURE);
         }
@@ -2046,16 +2056,6 @@ static void inp_chk_for_multi_in_vcvs(struct card *c, int *line_number)
                         (fcn_b = strstr(line, "nor(")) != NULL ||
                         (fcn_b = strstr(line, "or(")) != NULL) &&
                     isspace_c(fcn_b[-1])) {
-                char keep, *comma_ptr, *xy_values1[5], *xy_values2[5];
-                char *out_str, *ctrl_nodes_str,
-                        *xy_values1_b = NULL, *ref_str, *fcn_name,
-                        *fcn_e = NULL, *out_b, *out_e, *ref_e;
-                char *m_instance, *m_model;
-                char *xy_values2_b = NULL, *xy_values1_e = NULL,
-                     *ctrl_nodes_b = NULL, *ctrl_nodes_e = NULL;
-                int xy_count1, xy_count2;
-                bool ok = FALSE;
-
 #ifndef XSPICE
                 fprintf(stderr,
                         "\n"
@@ -2067,7 +2067,16 @@ static void inp_chk_for_multi_in_vcvs(struct card *c, int *line_number)
                         "instructions\n",
                         *line_number, line);
                 controlled_exit(EXIT_BAD);
-#endif
+#else
+                char keep, *comma_ptr, *xy_values1[5], *xy_values2[5];
+                char *out_str, *ctrl_nodes_str,
+                        *xy_values1_b = NULL, *ref_str, *fcn_name,
+                        *fcn_e = NULL, *out_b, *out_e, *ref_e;
+                char *m_instance, *m_model;
+                char *xy_values2_b = NULL, *xy_values1_e = NULL,
+                     *ctrl_nodes_b = NULL, *ctrl_nodes_e = NULL;
+                int xy_count1, xy_count2;
+                bool ok = FALSE;
 
                 do {
                     ref_e = skip_non_ws(line);
@@ -2168,6 +2177,7 @@ static void inp_chk_for_multi_in_vcvs(struct card *c, int *line_number)
                 *c->line = '*';
                 c = insert_new_line(c, m_instance, (*line_number)++, c->linenum_orig);
                 c = insert_new_line(c, m_model, (*line_number)++, c->linenum_orig);
+#endif
             }
         }
     }
@@ -2345,6 +2355,8 @@ static char *get_subckt_model_name(char *line)
 
     name = skip_non_ws(line); // eat .subckt|.model
     name = skip_ws(name);
+
+    
 
     end_ptr = skip_non_ws(name);
 
@@ -2858,8 +2870,10 @@ static char *inp_spawn_brace(char *s)
   removes  " " quotes, returns lower case letters,
   replaces non-printable characters with '_', however if
   non-printable character is the only character in a line,
-  replace it by '*'. If there is a XSPICE code model .model
-  line with file input, keep quotes and case for the file path.
+  replace it by '*'. Leave quotes in .param, .subckt and x
+  (subcircuit instance) cards to allow string-valued parameters.
+  If there is a XSPICE code model .model line with file input,
+  keep quotes and case for the file path.
   *-------------------------------------------------------------------------*/
 
 void inp_casefix(char *string)
@@ -2872,20 +2886,23 @@ void inp_casefix(char *string)
         return;
     }
     if (string) {
+        bool keepquotes;
+
 #ifdef XSPICE
-        /* special treatment of code model file input */
         char* tmpstr = NULL;
-        bool keepquotes = ciprefix(".model", string);
-        if (keepquotes){
+
+        /* Special treatment of code model file input. */
+
+        if (ciprefix(".model", string))
             tmpstr = strstr(string, "file=");
-            keepquotes = keepquotes && tmpstr;
-        }
 #endif
+        keepquotes = ciprefix(".param", string); // Allow string params
+
         while (*string) {
 #ifdef XSPICE
             /* exclude file name inside of quotes from getting lower case,
                keep quotes to enable spaces in file path */
-            if (keepquotes && string == tmpstr) {
+            if (string == tmpstr) {
                 string = string + 6; // past first quote
                 while (*string && *string != '"')
                     string++;
@@ -2896,12 +2913,13 @@ void inp_casefix(char *string)
             }
 #endif
             if (*string == '"') {
-                *string++ = ' ';
+                if (!keepquotes)
+                    *string++ = ' ';
                 while (*string && *string != '"')
                     string++;
                 if (*string == '\0')
                     continue; /* needed if string is "something ! */
-                if (*string == '"')
+                if (*string == '"' && !keepquotes)
                     *string = ' ';
             }
             if (*string && !isspace_c(*string) && !isprint_c(*string))
@@ -3052,7 +3070,7 @@ static void inp_change_quotes(char *s)
 static void add_name(struct names *p, char *name)
 {
     if (p->num_names >= N_SUBCKT_W_PARAMS) {
-        fprintf(stderr, "ERROR, N_SUBCKT_W_PARMS overflow\n");
+        fprintf(stderr, "ERROR: N_SUBCKT_W_PARMS overflow, more than %d subcircuits\n", N_SUBCKT_W_PARAMS);
         controlled_exit(EXIT_FAILURE);
     }
 
@@ -3749,7 +3767,7 @@ static void free_function(struct function *fcn)
 static void new_function_parameter(struct function *fcn, char *parameter)
 {
     if (fcn->num_parameters >= N_PARAMS) {
-        fprintf(stderr, "ERROR, N_PARAMS overflow\n");
+        fprintf(stderr, "ERROR, N_PARAMS overflow, more than %d parameters\n", N_PARAMS);
         controlled_exit(EXIT_FAILURE);
     }
 
@@ -4655,10 +4673,10 @@ int get_number_terminals(char *c)
             while ((i < 12) && (*cc != '\0')) {
                 char* comma;
                 name[i] = gettok_instance(&cc);
-                if (strstr(name[i], "off") || strchr(name[i], '='))
+                if (search_plain_identifier(name[i], "off") || strchr(name[i], '='))
                     j++;
 #ifdef CIDER
-                if (strstr(name[i], "save") || strstr(name[i], "print"))
+                if (search_plain_identifier(name[i], "save") || search_plain_identifier(name[i], "print"))
                     j++;
 #endif
                 /* If we have IC=VBE, VCE instead of IC=VBE,VCE we need to inc
@@ -4699,6 +4717,28 @@ int get_number_terminals(char *c)
             }
             break;
         }
+#ifdef OSDI
+        case 'n': /* Recognize an unknown number of nodes by stopping at tokens with '=' */
+        {
+            i = 0;
+            char* cc, * ccfree;
+            cc = copy(c);
+            /* required to make m= 1 a single token m=1 */
+            ccfree = cc = inp_remove_ws(cc);
+            /* find the first token with "off", "tnodeout", "thermal" or "=" in the line*/
+            while ((i < 20) && (*cc != '\0')) {
+                char* inst = gettok_instance(&cc);
+                strncpy(nam_buf, inst, sizeof(nam_buf) - 1);
+                txfree(inst);
+                if (i > 2 && (strchr(nam_buf, '=')))
+                    break;
+                i++;
+            }
+            tfree(ccfree);
+            return i - 2;
+            break;
+        }
+#endif
         default:
             return 0;
             break;
@@ -4927,6 +4967,7 @@ static struct card *inp_reorder_params_subckt(
     }
 
     /* the terminating `.ends' deck wasn't found */
+    fprintf(stderr, "Error: Missing .ends statement\n");
     controlled_exit(EXIT_FAILURE);
 }
 
@@ -5020,24 +5061,40 @@ static int inp_split_multi_param_lines(struct card *card, int line_num)
 
                 char *beg_param, *end_param;
 
-                bool get_expression = FALSE;
-                bool get_paren_expression = FALSE;
+                int expression_depth = 0;
+                int paren_depth = 0;
 
                 beg_param = skip_back_ws(equal_ptr, curr_line);
                 beg_param = skip_back_non_ws(beg_param, curr_line);
                 end_param = skip_ws(equal_ptr + 1);
-                while (*end_param != '\0' &&
-                        (!isspace_c(*end_param) || get_expression ||
-                                get_paren_expression)) {
-                    if (*end_param == '{')
-                        get_expression = TRUE;
-                    if (*end_param == '(')
-                        get_paren_expression = TRUE;
-                    if (*end_param == '}')
-                        get_expression = FALSE;
-                    if (*end_param == ')')
-                        get_paren_expression = FALSE;
-                    end_param++;
+                while (*end_param && !isspace_c(*end_param)) {
+                    /* Advance over numeric or string expression. */
+
+                    if (*end_param == '"') {
+                        /* RHS is quoted string. */
+
+                        end_param++;
+                        while (*end_param != '\0' && *end_param != '"')
+                            end_param++;
+                        if (*end_param == '"')
+                            end_param++;
+                    } else {
+                        while (*end_param != '\0' && *end_param != '"' &&
+                               (!isspace_c(*end_param) ||
+                                expression_depth || paren_depth)) {
+                            if (*end_param == ',' && paren_depth == 0)
+                                break;
+                            if (*end_param == '{')
+                                ++expression_depth;
+                            if (*end_param == '(')
+                                ++paren_depth;
+                            if (*end_param == '}' && expression_depth > 0)
+                                --expression_depth;
+                            if (*end_param == ')' && paren_depth > 0)
+                                --paren_depth;
+                            end_param++;
+                        }
+                    }
                 }
 
                 if (end_param[-1] == ',')
@@ -5959,11 +6016,14 @@ static void inp_compat(struct card *card)
             /* evaluate m */
             char* mstr = eval_m(cut_line, card->line);
 
-            /* white noise model by x2line, x3line, x4line
-               if instance parameter noisy=1 (or noise=1) is set */
-            bool rnoise = FALSE;
+            /* white noise model by x2line, x3line, x4line */
+            /* if variable enable_noisy_r is set */
+            bool rnoise = cp_getvar("enable_noisy_r", CP_BOOL, NULL, 0);
+            /* if instance parameter noisy=1 (or noise=1) is set */
             if (strstr(cut_line, "noisy=1") || strstr(cut_line, "noise=1"))
                 rnoise = TRUE;
+            else if (strstr(cut_line, "noisy=0") || strstr(cut_line, "noise=0"))
+                rnoise = FALSE;
 
             /* tc1, tc2, and m are enabled */
             xline = tprintf("b%s %s %s i = v(%s, %s)/(%s) %s %s reciproctc=1 reciprocm=0",
@@ -6950,9 +7010,12 @@ static void inp_poly_err(struct card *card)
 void tprint(struct card *t)
 {
     struct card *tmp;
-
+    static int npr;
+    char outfile[100];
+    sprintf(outfile, "tprint-out%d.txt", npr);
+    npr++;
     /*debug: print into file*/
-    FILE *fd = fopen("tprint-out.txt", "w");
+    FILE *fd = fopen(outfile, "w");
     for (tmp = t; tmp; tmp = tmp->nextcard)
         if (*(tmp->line) != '*')
             fprintf(fd, "%6d  %6d  %s\n", tmp->linenum_orig, tmp->linenum,
@@ -9971,7 +10034,8 @@ static char inp_get_elem_ident(char *type)
         return 'm';
     if (cieq(type, "res"))
         return 'r';
-    /* xspice code models do not have unique type names */
+    /* xspice code models do not have unique type names,
+       but could also be an OSDI/OpenVAF model. */
     else
         return 'a';
 }
@@ -10092,7 +10156,7 @@ struct nscope *inp_add_levels(struct card *deck)
             }
             else if (ciprefix(".ends", curr_line)) {
                 if (lvl == root) {
-                    fprintf(stderr, ".subckt/.ends not balanced\n");
+                    fprintf(stderr, "Error: .subckt/.ends not balanced\n");
                     controlled_exit(1);
                 }
                 card->level = lvl;
@@ -10251,7 +10315,7 @@ void inp_rem_unused_models(struct nscope *root, struct card *deck)
                 struct modellist *m =
                         inp_find_model(card->level, elem_model_name);
                 if (m) {
-                    if (*curr_line != m->elemb)
+                    if (*curr_line != m->elemb && !(*curr_line == 'n' && m->elemb == 'a'))
                         fprintf(stderr,
                                 "warning, model type mismatch in line\n    "
                                 "%s\n",
@@ -10281,7 +10345,7 @@ void inp_rem_unused_models(struct nscope *root, struct card *deck)
  * only correct UTF-8. It also spots UTF-8 sequences that could cause
  * trouble if converted to UTF-16, namely surrogate characters
  * (U+D800..U+DFFF) and non-Unicode positions (U+FFFE..U+FFFF).
- * In addition we check for some ngspice-specific characters like µ etc.*/
+ * In addition we check for some ngspice-specific characters like ï¿½ etc.*/
 #ifndef EXT_ASC
 static unsigned char*
 utf8_check(unsigned char *s)
@@ -10291,12 +10355,12 @@ utf8_check(unsigned char *s)
             /* 0xxxxxxx */
             s++;
         else if (*s == 0xb5) {
-            /* translate ansi micro µ to u */
+            /* translate ansi micro ï¿½ to u */
             *s = 'u';
             s++;
         }
         else if (s[0] == 0xc2 && s[1] == 0xb5) {
-            /* translate utf-8 micro µ to u */
+            /* translate utf-8 micro ï¿½ to u */
             s[0] = 'u';
             /* remove second byte */
             unsigned char *y = s + 1;

@@ -1,4 +1,4 @@
-@c This file will be processed with texinfo.
+ngspice authors
 
 Spice was originally written at The University of California at Berkeley (USA).
 Since then, there have been many people working on the software, most of them
@@ -74,6 +74,7 @@ Dietmar Warning,
 Michael Widlok,
 Charles D.H. Williams,
 Antony Wilson,
+Pascal Kuthe,
 and many others...
 
 If someone helped in the development and has not been inserted in this list

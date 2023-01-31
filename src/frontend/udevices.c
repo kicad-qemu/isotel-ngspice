@@ -10,12 +10,15 @@
     using the previously stored delays.
 
     Some limitations are:
-        No support for logicexp, pindly, and constraint behavioral primitives.
+        No support for DLYLINE, CONSTRAINT, RAM, ROM, STIM, PLAs.
         Approximations to the Pspice timing delays. Typical values for delays
         are estimated. Pspice has a rich set of timing simulation features,
         such as checks for setup/hold violations, minimum pulse width, and
-        hazard detection.
+        hazard detection. These timing simulation features are not available
+        in Xspice.
         Only the common logic gates, flip-flops, and latches are supported.
+        LOGICEXP and PINDLY are supported in logicexp.c through the functions
+        f_logicexp and f_pindly.
 
    First pass through a subcircuit. Call initialize_udevice() and read the
    .model cards by calling u_process_model_line() (or similar) for each card,
@@ -54,6 +57,7 @@
 #include "ngspice/cpextern.h"
 #include "ngspice/macros.h"
 #include "ngspice/udevices.h"
+#include "ngspice/logicexp.h"
 
 extern struct card* insert_new_line(
     struct card* card, char* line, int linenum, int linenum_orig);
@@ -261,6 +265,8 @@ static void clear_name_list(NAME_ENTRY nelist, char *msg)
 #ifdef TRACE
     printf("%s\n", msg);
     print_name_list(nelist);
+#else
+    (void)msg;
 #endif
     for (x = nelist; x; x = next) {
         next = x->next;
@@ -289,6 +295,10 @@ static void print_name_list(NAME_ENTRY nelist)
 */
 static int ps_port_directions = 0;  // If non-zero list subckt port directions
 static int ps_udevice_msgs = 0;  // Controls the verbosity of U* warnings
+/*
+  If ps_udevice_exit is non-zero then exit when u_process_instance fails
+*/
+static int ps_udevice_exit = 0;
 static NAME_ENTRY new_names_list = NULL;
 static NAME_ENTRY input_names_list = NULL;
 static NAME_ENTRY output_names_list = NULL;
@@ -297,13 +307,14 @@ static NAME_ENTRY port_names_list = NULL;
 static unsigned int num_name_collisions = 0;
 /* .model d_zero_inv99 d_inverter just once per subckt */
 static BOOL add_zero_delay_inverter_model = FALSE;
+static BOOL add_drive_hilo = FALSE;
 static char *current_subckt = NULL;
 static unsigned int subckt_msg_count = 0;
 
 static void check_name_unused(char *name)
 {
     if (find_name_entry(name, new_names_list)) {
-        printf("ERROR udevice name %s already used\n", name);
+        fprintf(stderr, "ERROR udevice name %s already used\n", name);
         num_name_collisions++;
     } else {
         if (!new_names_list) {
@@ -318,7 +329,7 @@ static void find_collision(char *name, NAME_ENTRY nelist)
 {
     if (!nelist) { return; }
     if (find_name_entry(name, nelist)) {
-        printf("ERROR name collision: internal node %s "
+        fprintf(stderr, "ERROR name collision: internal node %s "
             "collides with a pin or port\n", name);
         num_name_collisions++;
     }
@@ -717,8 +728,34 @@ struct card *replacement_udevice_cards(void)
         return NULL;
     }
     if (add_zero_delay_inverter_model) {
-        x = create_xlate_translated(".model d_zero_inv99 d_inverter");
+        x = create_xlate_translated(
+        ".model d_zero_inv99 d_inverter(rise_delay=1.0e-12 fall_delay=1.0e-12)");
         translated_p = add_xlator(translated_p, x);
+    }
+    if (add_drive_hilo) {
+        x = create_xlate_translated(".subckt hilo_dollar___lo drive___0");
+        translated_p = add_xlator(translated_p, x);
+        x = create_xlate_translated("a1 0 drive___0 dbuf1");
+        translated_p = add_xlator(translated_p, x);
+        x = create_xlate_translated(
+        ".model dbuf1 d_buffer(rise_delay=1.0e-12 fall_delay=1.0e-12)");
+        translated_p = add_xlator(translated_p, x);
+        x = create_xlate_translated(".ends hilo_dollar___lo");
+        translated_p = add_xlator(translated_p, x);
+        x = create_xlate_translated(".subckt hilo_dollar___hi drive___1");
+        translated_p = add_xlator(translated_p, x);
+        x = create_xlate_translated("a2 0 drive___1 dinv1");
+        translated_p = add_xlator(translated_p, x);
+        x = create_xlate_translated(
+        ".model dinv1 d_inverter(rise_delay=1.0e-12 fall_delay=1.0e-12)");
+        translated_p = add_xlator(translated_p, x);
+        x = create_xlate_translated(".ends hilo_dollar___hi");
+        translated_p = add_xlator(translated_p, x);
+        x = create_xlate_translated("x8100000 hilo_drive___1 hilo_dollar___hi");
+        translated_p = add_xlator(translated_p, x);
+        x = create_xlate_translated("x8100001 hilo_drive___0 hilo_dollar___lo");
+        translated_p = add_xlator(translated_p, x);
+
     }
     for (x = first_xlator(translated_p); x; x = next_xlator(translated_p)) {
         if (ps_port_directions >= 2) {
@@ -737,6 +774,29 @@ struct card *replacement_udevice_cards(void)
         }
     }
     return newcard;
+}
+
+void u_add_instance(char *str)
+{
+    Xlatep x;
+
+    if (str && strlen(str) > 0) {
+        x = create_xlate_translated(str);
+        (void) add_xlator(translated_p, x);
+    }
+}
+
+static BOOL gen_timing_model(
+    char *tmodel, char *utype, char *xspice, char *newname, Xlatorp xlp);
+
+void u_add_logicexp_model(char *tmodel, char *xspice_gate, char *model_name)
+{
+    Xlatorp xlp = NULL;
+    xlp = create_xlator();
+    if (gen_timing_model(tmodel, "ugate", xspice_gate, model_name, xlp)) {
+        append_xlator(translated_p, xlp);
+    }
+    delete_xlator(xlp);
 }
 
 void initialize_udevice(char *subckt_line)
@@ -766,6 +826,12 @@ void initialize_udevice(char *subckt_line)
     if (!cp_getvar("ps_udevice_msgs", CP_NUM, &ps_udevice_msgs, 0)) {
         ps_udevice_msgs = 0;
     }
+    /*
+      If ps_udevice_exit is non-zero then exit when u_process_instance fails
+    */
+    if (!cp_getvar("ps_udevice_exit", CP_NUM, &ps_udevice_exit, 0)) {
+        ps_udevice_exit = 0;
+    }
     if (subckt_line && strncmp(subckt_line, ".subckt", 7) == 0) {
         add_all_port_names(subckt_line);
         current_subckt = TMALLOC(char, strlen(subckt_line) + 1);
@@ -791,6 +857,7 @@ void initialize_udevice(char *subckt_line)
     (void) add_xlator(default_models, xdata);
     /* reset for the new subckt */
     add_zero_delay_inverter_model = FALSE;
+    add_drive_hilo = FALSE;
 }
 
 static void determine_port_type(void)
@@ -834,6 +901,7 @@ void cleanup_udevice(void)
     delete_xlator(default_models);
     default_models = NULL;
     add_zero_delay_inverter_model = FALSE;
+    add_drive_hilo = FALSE;
     clear_name_list(input_names_list, "INPUT_PINS");
     input_names_list = NULL;
     clear_name_list(output_names_list, "OUTPUT_PINS");
@@ -1452,7 +1520,7 @@ static struct instance_hdr *create_instance_header(char *line)
     return hdr;
 }
 
-char *new_inverter(char *iname, char *node, Xlatorp xlp)
+static char *new_inverter(char *iname, char *node, Xlatorp xlp)
 {
     /* Return the name of the output of the new inverter */
     /* tfree the returned string after it has been used by the caller */
@@ -2307,22 +2375,28 @@ static Xlatorp gen_gate_instance(struct gate_instance *gip)
     }
 }
 
-static void extract_model_param(char *rem, char *pname, char *buf)
+static void extract_model_param(char *rem, char *param_name, char *buf)
 {
-    char *p1, *p2, *p3;
+    /* Find the value of timing model parameter 'param_name'
+       in the remainder of the .model line.
+       Expect: param_name zero_or_more_ws '=' zero_or_more_ws value
+    */
+    char *p1 = NULL;
 
-    p1 = strstr(rem, pname);
+    p1 = strstr(rem, param_name);
     if (p1) {
-        p2 = strchr(p1, '=');
-        if (isspace(p2[1])) {
-            p3 = skip_ws(&p2[1]);
-        } else {
-            p3 = &p2[1];
+        p1 += strlen(param_name);
+        p1 = skip_ws(p1);
+        if (p1[0] != '=') {
+            buf[0] = '\0';
+            return;
         }
-        while (!isspace(p3[0]) && p3[0] != ')') {
-            *buf = p3[0];
+        p1++;
+        p1 = skip_ws(p1);
+        while (!isspace(p1[0]) && p1[0] != ')') {
+            *buf = p1[0];
             buf++;
-            p3++;
+            p1++;
         }
         *buf = '\0';
     } else {
@@ -2357,7 +2431,7 @@ static struct timing_data *create_min_typ_max(char *prefix, char *rem)
     tdp->estimate = EST_UNK;
 
     strcpy(mntymxstr, prefix);
-    strcat(mntymxstr, "mn=");
+    strcat(mntymxstr, "mn");
     extract_model_param(rem, mntymxstr, buf);
     tdp->min = NULL;
     if (bufsave[0]) {
@@ -2367,7 +2441,7 @@ static struct timing_data *create_min_typ_max(char *prefix, char *rem)
 
     buf = bufsave;
     strcpy(mntymxstr, prefix);
-    strcat(mntymxstr, "ty=");
+    strcat(mntymxstr, "ty");
     extract_model_param(rem, mntymxstr, buf);
     tdp->typ = NULL;
     if (bufsave[0]) {
@@ -2377,7 +2451,7 @@ static struct timing_data *create_min_typ_max(char *prefix, char *rem)
 
     buf = bufsave;
     strcpy(mntymxstr, prefix);
-    strcat(mntymxstr, "mx=");
+    strcat(mntymxstr, "mx");
     extract_model_param(rem, mntymxstr, buf);
     tdp->max = NULL;
     if (bufsave[0]) {
@@ -2416,7 +2490,7 @@ static void estimate_typ(struct timing_data *tdp)
         if (strlen(tmpmin) > 0 && strlen(tmpmax) > 0) {
             valmin = strtof(tmpmin, &units1);
             valmax = strtof(tmpmax, &units2);
-            average = (valmin + valmax) / (float)2.0;
+            average = (float)((valmin + valmax) / 2.0);
             tdp->ave = tprintf("%.2f%s", average, units2);
             if (!eq(units1, units2)) {
                 printf("WARNING units do not match\n");
@@ -2456,12 +2530,34 @@ static char *get_estimate(struct timing_data *tdp)
     return NULL;
 }
 
+static char *larger_delay(char *delay1, char *delay2)
+{
+    float val1, val2;
+    char *units1, *units2;
+
+    val1 = strtof(delay1, &units1);
+    val2 = strtof(delay2, &units2);
+    if (!eq(units1, units2)) {
+        printf("WARNING units do not match\n");
+    }
+    if (val1 >= val2) {
+        return delay1;
+    } else {
+        return delay2;
+    }
+}
+
 /* NOTE
   The get_delays_...() functions calculate estimates of typical delays
   from the Pspice ugate, utgate, ueff, and ugff timing models.
   These functions are called from u_process_model(), and the delay strings
   are added to the timing model Xlator by add_delays_to_model_xlator().
 */
+static char *get_zero_rise_fall(void)
+{
+    return tprintf("(rise_delay=1.0e-12 fall_delay=1.0e-12)");
+}
+
 static char *get_delays_ugate(char *rem)
 {
     char *rising, *falling, *delays = NULL;
@@ -2477,7 +2573,11 @@ static char *get_delays_ugate(char *rem)
         if (strlen(rising) > 0 && strlen(falling) > 0) {
             delays = tprintf("(rise_delay = %s fall_delay = %s)",
                             rising, falling);
+        } else {
+            delays = get_zero_rise_fall();
         }
+    } else {
+        delays = get_zero_rise_fall();
     }
     delete_timing_data(tdp1);
     delete_timing_data(tdp2);
@@ -2489,6 +2589,9 @@ static char *get_delays_utgate(char *rem)
     /* Return estimate of tristate delay (delay = val3) */
     char *rising, *falling, *delays = NULL;
     struct timing_data *tdp1, *tdp2;
+    struct timing_data *tdp3, *tdp4, *tdp5, *tdp6;
+    char *tplz, *tphz, *tpzl, *tpzh, *larger, *larger1, *larger2, *larger3;
+    BOOL use_zdelays = FALSE;
 
     tdp1 = create_min_typ_max("tplh", rem);
     estimate_typ(tdp1);
@@ -2496,10 +2599,70 @@ static char *get_delays_utgate(char *rem)
     tdp2 = create_min_typ_max("tphl", rem);
     estimate_typ(tdp2);
     falling = get_estimate(tdp2);
-    if (rising && falling) {
-        if (strlen(rising) > 0 && strlen(falling) > 0) {
+    if (rising && strlen(rising) > 0) {
+        if (falling && strlen(falling) > 0) {
+            larger = larger_delay(rising, falling);
+            delays = tprintf("(delay = %s)", larger);
+        } else {
             delays = tprintf("(delay = %s)", rising);
         }
+    } else if (falling && strlen(falling) > 0) {
+        delays = tprintf("(delay = %s)", falling);
+    } else if (use_zdelays) {
+        /* No lh/hl delays, so try the largest lz/hz/zl/zh delay */
+        tdp3 = create_min_typ_max("tplz", rem);
+        estimate_typ(tdp3);
+        tplz = get_estimate(tdp3);
+        tdp4 = create_min_typ_max("tphz", rem);
+        estimate_typ(tdp4);
+        tphz = get_estimate(tdp4);
+        larger1 = NULL;
+        if (tplz && strlen(tplz) > 0) {
+            if (tphz && strlen(tphz) > 0) {
+                larger1 = larger_delay(tplz, tphz);
+            } else {
+                larger1 = tplz;
+            }
+        } else if (tphz && strlen(tphz) > 0) {
+            larger1 = tphz;
+        }
+        tdp5 = create_min_typ_max("tpzl", rem);
+        estimate_typ(tdp5);
+        tpzl = get_estimate(tdp5);
+        tdp6 = create_min_typ_max("tpzh", rem);
+        estimate_typ(tdp6);
+        tpzh = get_estimate(tdp6);
+        larger2 = NULL;
+        if (tpzl && strlen(tpzl) > 0) {
+            if (tpzh && strlen(tpzh) > 0) {
+                larger2 = larger_delay(tpzl, tpzh);
+            } else {
+                larger2 = tpzl;
+            }
+        } else if (tpzh && strlen(tpzh) > 0) {
+            larger2 = tpzh;
+        }
+        larger3 = NULL;
+        if (larger1) {
+            if (larger2) {
+                larger3 = larger_delay(larger1, larger2);
+            } else {
+                larger3 = larger1;
+            }
+        } else if (larger2) {
+            larger3 = larger2;
+        }
+        if (larger3) {
+            delays = tprintf("(delay = %s)", larger3);
+        } else {
+            delays = tprintf("(delay=1.0e-12)");
+        }
+        delete_timing_data(tdp3);
+        delete_timing_data(tdp4);
+        delete_timing_data(tdp5);
+        delete_timing_data(tdp6);
+    } else { // Not use_zdelays
+        delays = tprintf("(delay=1.0e-12)");
     }
     delete_timing_data(tdp1);
     delete_timing_data(tdp2);
@@ -2510,7 +2673,7 @@ static char *get_delays_ueff(char *rem)
 {
     char *delays = NULL;
     char *clkqrise, *clkqfall, *pcqrise, *pcqfall;
-    char *clkd, *setd, *resetd;
+    char *clkd, *setd, *resetd, *larger;
     struct timing_data *tdp1, *tdp2, *tdp3, *tdp4;
 
     tdp1 = create_min_typ_max("tpclkqlh", rem);
@@ -2527,14 +2690,25 @@ static char *get_delays_ueff(char *rem)
     pcqfall = get_estimate(tdp4);
     clkd = NULL;
     if (clkqrise && strlen(clkqrise) > 0) {
-        clkd = clkqrise;
+        if (clkqfall && strlen(clkqfall) > 0) {
+            larger = larger_delay(clkqrise, clkqfall);
+            clkd = larger;
+        } else {
+            clkd = clkqrise;
+        }
     } else if (clkqfall && strlen(clkqfall) > 0) {
         clkd = clkqfall;
     }
     setd = NULL;
     resetd = NULL;
+    /* pcqrise is set_delay, pcqfall is reset_delay */
     if (pcqrise && strlen(pcqrise) > 0) {
-        setd = resetd = pcqrise;
+        if (pcqfall && strlen(pcqfall) > 0) {
+            setd = pcqrise;
+            resetd = pcqfall;
+        } else {
+            setd = resetd = pcqrise;
+        }
     } else if (pcqfall && strlen(pcqfall) > 0) {
         setd = resetd = pcqfall;
     }
@@ -2566,7 +2740,7 @@ static char *get_delays_ugff(char *rem, char *d_name)
     char *delays = NULL, *dname;
     char *tpdqlh, *tpdqhl, *tpgqlh, *tpgqhl, *tppcqlh, *tppcqhl;
     char *d_delay, *enab, *setd, *resetd;
-    char *s1, *s2;
+    char *s1, *s2, *larger;
     struct timing_data *tdp1, *tdp2, *tdp3, *tdp4, *tdp5, *tdp6;
 
     if (eq(d_name, "d_dlatch")) {
@@ -2596,13 +2770,23 @@ static char *get_delays_ugff(char *rem, char *d_name)
     tppcqhl = get_estimate(tdp6);
     d_delay = NULL;
     if (tpdqlh && strlen(tpdqlh) > 0) {
-        d_delay = tpdqlh;
+        if (tpdqhl && strlen(tpdqhl) > 0) {
+            larger = larger_delay(tpdqlh, tpdqhl);
+            d_delay = larger;
+        } else {
+            d_delay = tpdqlh;
+        }
     } else if (tpdqhl && strlen(tpdqhl) > 0) {
         d_delay = tpdqhl;
     }
     enab = NULL;
     if (tpgqlh && strlen(tpgqlh) > 0) {
-        enab = tpgqlh;
+        if (tpgqhl && strlen(tpgqhl) > 0) {
+            larger = larger_delay(tpgqlh, tpgqhl);
+            enab = larger;
+        } else {
+            enab = tpgqlh;
+        }
     } else if (tpgqhl && strlen(tpgqhl) > 0) {
         enab = tpgqhl;
     }
@@ -2621,8 +2805,14 @@ static char *get_delays_ugff(char *rem, char *d_name)
     }
     setd = NULL;
     resetd = NULL;
+    /* tppcqlh is set_delay, tppcqhl is reset_delay */
     if (tppcqlh && strlen(tppcqlh) > 0) {
-        setd = resetd = tppcqlh;
+        if (tppcqhl && strlen(tppcqhl) > 0) {
+            setd = tppcqlh;
+            resetd = tppcqhl;
+        } else {
+            setd = resetd = tppcqlh;
+        }
     } else if (tppcqhl && strlen(tppcqhl) > 0) {
         setd = resetd = tppcqhl;
     }
@@ -2708,6 +2898,25 @@ static BOOL u_process_model(char *nline, char *original)
     return retval;
 }
 
+static char *get_name_hilo(char *tok_str)
+{
+    char *name = NULL;
+
+    if (eq(tok_str, "$d_hi")) {
+        name = TMALLOC(char, strlen("hilo_drive___1") + 1);
+        strcpy(name, "hilo_drive___1");
+        add_drive_hilo = TRUE;
+    } else if (eq(tok_str, "$d_lo")) {
+        name = TMALLOC(char, strlen("hilo_drive___0") + 1);
+        strcpy(name, "hilo_drive___0");
+        add_drive_hilo = TRUE;
+    } else {
+        name = TMALLOC(char, strlen(tok_str) + 1);
+        (void) memcpy(name, tok_str, strlen(tok_str) + 1);
+    }
+    return name;
+}
+
 static struct dff_instance *add_dff_inout_timing_model(
     struct instance_hdr *hdr, char *start)
 {
@@ -2735,9 +2944,7 @@ static struct dff_instance *add_dff_inout_timing_model(
     arrp = dffip->d_in;
     for (i = 0; i < num_gates; i++) {
         tok = strtok(NULL, " \t");
-        name = TMALLOC(char, strlen(tok) + 1);
-        (void) memcpy(name, tok, strlen(tok) + 1);
-        arrp[i] = name;
+        arrp[i] = get_name_hilo(tok);
     }
     /* q_out outputs */
     dffip->q_out = TMALLOC(char *, num_gates);
@@ -2766,7 +2973,7 @@ static struct dff_instance *add_dff_inout_timing_model(
     /* Reject incompatible inputs */
     arrp = dffip->d_in;
     for (i = 0; i < num_gates; i++) {
-        if (strncmp(arrp[i], "$d_", 3) == 0) {
+        if (eq(arrp[i], "$d_nc")) {
             delete_dff_instance(dffip);
             return NULL;
         }
@@ -2795,7 +3002,7 @@ static struct dltch_instance *add_dltch_inout_timing_model(
     dlp->num_gates = num_gates;
     copyline = TMALLOC(char, strlen(start) + 1);
     (void) memcpy(copyline, start, strlen(start) + 1);
-    /* prebar, clrbar, clk */
+    /* prebar, clrbar, clk(gate) */
     tok = strtok(copyline, " \t");
     dlp->prebar = TMALLOC(char, strlen(tok) + 1);
     (void) memcpy(dlp->prebar, tok, strlen(tok) + 1);
@@ -2803,16 +3010,14 @@ static struct dltch_instance *add_dltch_inout_timing_model(
     dlp->clrbar = TMALLOC(char, strlen(tok) + 1);
     (void) memcpy(dlp->clrbar, tok, strlen(tok) + 1);
     tok = strtok(NULL, " \t");
-    dlp->gate = TMALLOC(char, strlen(tok) + 1);
-    (void) memcpy(dlp->gate, tok, strlen(tok) + 1);
+    dlp->gate = get_name_hilo(tok);
+
     /* d inputs */
     dlp->d_in = TMALLOC(char *, num_gates);
     arrp = dlp->d_in;
     for (i = 0; i < num_gates; i++) {
         tok = strtok(NULL, " \t");
-        name = TMALLOC(char, strlen(tok) + 1);
-        (void) memcpy(name, tok, strlen(tok) + 1);
-        arrp[i] = name;
+        arrp[i] = get_name_hilo(tok);
     }
     /* q_out outputs */
     dlp->q_out = TMALLOC(char *, num_gates);
@@ -2841,12 +3046,12 @@ static struct dltch_instance *add_dltch_inout_timing_model(
     /* Reject incompatible inputs */
     arrp = dlp->d_in;
     for (i = 0; i < num_gates; i++) {
-        if (strncmp(arrp[i], "$d_", 3) == 0) {
+        if (eq(arrp[i], "$d_nc")) {
             delete_dltch_instance(dlp);
             return NULL;
         }
     }
-    if (strncmp(dlp->gate, "$d_", 3) == 0) {
+    if (eq(dlp->gate, "$d_nc")) {
         delete_dltch_instance(dlp);
         return NULL;
     }
@@ -2888,18 +3093,14 @@ static struct jkff_instance *add_jkff_inout_timing_model(
     arrp = jkffip->j_in;
     for (i = 0; i < num_gates; i++) {
         tok = strtok(NULL, " \t");
-        name = TMALLOC(char, strlen(tok) + 1);
-        (void) memcpy(name, tok, strlen(tok) + 1);
-        arrp[i] = name;
+        arrp[i] = get_name_hilo(tok);
     }
     /* k inputs */
     jkffip->k_in = TMALLOC(char *, num_gates);
     arrp = jkffip->k_in;
     for (i = 0; i < num_gates; i++) {
         tok = strtok(NULL, " \t");
-        name = TMALLOC(char, strlen(tok) + 1);
-        (void) memcpy(name, tok, strlen(tok) + 1);
-        arrp[i] = name;
+        arrp[i] = get_name_hilo(tok);
     }
     /* q_out outputs */
     jkffip->q_out = TMALLOC(char *, num_gates);
@@ -2929,8 +3130,7 @@ static struct jkff_instance *add_jkff_inout_timing_model(
     arrp = jkffip->j_in;
     arrpk = jkffip->k_in;
     for (i = 0; i < num_gates; i++) {
-        if (strncmp(arrp[i], "$d_", 3) == 0 ||
-            strncmp(arrpk[i], "$d_", 3) == 0) {
+        if (eq(arrp[i], "$d_nc") || eq(arrpk[i], "$d_nc")) {
             delete_jkff_instance(jkffip);
             return NULL;
         }
@@ -2969,26 +3169,21 @@ static struct srff_instance *add_srff_inout_timing_model(
     (void) memcpy(srffp->clrbar, tok, strlen(tok) + 1);
 
     tok = strtok(NULL, " \t");
-    srffp->gate = TMALLOC(char, strlen(tok) + 1);
-    (void) memcpy(srffp->gate, tok, strlen(tok) + 1);
+    srffp->gate = get_name_hilo(tok);
 
     /* s inputs */
     srffp->s_in = TMALLOC(char *, num_gates);
     arrp = srffp->s_in;
     for (i = 0; i < num_gates; i++) {
         tok = strtok(NULL, " \t");
-        name = TMALLOC(char, strlen(tok) + 1);
-        (void) memcpy(name, tok, strlen(tok) + 1);
-        arrp[i] = name;
+        arrp[i] = get_name_hilo(tok);
     }
     /* r inputs */
     srffp->r_in = TMALLOC(char *, num_gates);
     arrp = srffp->r_in;
     for (i = 0; i < num_gates; i++) {
         tok = strtok(NULL, " \t");
-        name = TMALLOC(char, strlen(tok) + 1);
-        (void) memcpy(name, tok, strlen(tok) + 1);
-        arrp[i] = name;
+        arrp[i] = get_name_hilo(tok);
     }
     /* q_out outputs */
     srffp->q_out = TMALLOC(char *, num_gates);
@@ -3018,13 +3213,12 @@ static struct srff_instance *add_srff_inout_timing_model(
     arrp = srffp->s_in;
     arrpr = srffp->r_in;
     for (i = 0; i < num_gates; i++) {
-        if (strncmp(arrp[i], "$d_", 3) == 0 ||
-            strncmp(arrpr[i], "$d_", 3) == 0) {
+        if (eq(arrp[i], "$d_nc") || eq(arrpr[i], "$d_nc")) {
             delete_srff_instance(srffp);
             return NULL;
         }
     }
-    if (strncmp(srffp->gate, "$d_", 3) == 0) {
+    if (eq(srffp->gate, "$d_nc")) {
         delete_srff_instance(srffp);
         return NULL;
     }
@@ -3395,9 +3589,14 @@ BOOL u_check_instance(char *line)
     itype = hdr->instance_type;
     xspice = find_xspice_for_delay(itype);
     if (!xspice) {
+        if (eq(itype, "logicexp") || eq(itype, "pindly")
+            || eq(itype, "constraint")) {
+            delete_instance_hdr(hdr);
+            return TRUE;
+        }
         if (ps_udevice_msgs >= 1) {
             if (current_subckt && subckt_msg_count == 0) {
-                printf("%s\n", current_subckt);
+                printf("\nWARNING in %s\n", current_subckt);
             }
             subckt_msg_count++;
             printf("WARNING ");
@@ -3426,12 +3625,42 @@ BOOL u_process_instance(char *nline)
     char *p1, *itype, *xspice;
     struct instance_hdr *hdr = create_instance_header(nline);
     Xlatorp xp = NULL;
+    BOOL behav_ret = TRUE;
 
     itype = hdr->instance_type;
     xspice = find_xspice_for_delay(itype);
     if (!xspice) {
-        delete_instance_hdr(hdr);
-        return FALSE;
+        if (eq(itype, "logicexp")) {
+            delete_instance_hdr(hdr);
+            behav_ret = f_logicexp(nline);
+            if (!behav_ret && current_subckt) {
+                fprintf(stderr, "ERROR in %s\n", current_subckt);
+            }
+            if (!behav_ret && ps_udevice_exit) {
+                fprintf(stderr, "ERROR bad syntax in logicexp\n");
+                fflush(stdout);
+                controlled_exit(EXIT_FAILURE);
+            }
+            return behav_ret;
+        } else if (eq(itype, "pindly")) {
+            delete_instance_hdr(hdr);
+            behav_ret = f_pindly(nline);
+            if (!behav_ret && current_subckt) {
+                fprintf(stderr, "ERROR in %s\n", current_subckt);
+            }
+            if (!behav_ret && ps_udevice_exit) {
+                fprintf(stderr, "ERROR bad syntax in pindly\n");
+                fflush(stdout);
+                controlled_exit(EXIT_FAILURE);
+            }
+            return behav_ret;
+        } else if (eq(itype, "constraint")) {
+            delete_instance_hdr(hdr);
+            return TRUE;
+        } else {
+            delete_instance_hdr(hdr);
+            return FALSE;
+        }
     }
     if (ps_port_directions >= 2) {
         printf("TRANS_IN  %s\n", nline);
@@ -3451,6 +3680,14 @@ BOOL u_process_instance(char *nline)
         xp = translate_pull(hdr, p1);
     } else {
         delete_instance_hdr(hdr);
+        if (ps_udevice_exit) {
+            if (current_subckt) {
+                fprintf(stderr, "ERROR in %s\n", current_subckt);
+            }
+            fprintf(stderr, "ERROR unknown U* device\n");
+            fflush(stdout);
+            controlled_exit(EXIT_FAILURE);
+        }
         return FALSE;
     }
     if (xp) {
@@ -3458,6 +3695,14 @@ BOOL u_process_instance(char *nline)
         delete_xlator(xp);
         return TRUE;
     } else {
+        if (ps_udevice_exit) {
+            if (current_subckt) {
+                fprintf(stderr, "ERROR in %s\n", current_subckt);
+            }
+            fprintf(stderr, "ERROR U* device syntax error\n");
+            fflush(stdout);
+            controlled_exit(EXIT_FAILURE);
+        }
         return FALSE;
     }
 }

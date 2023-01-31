@@ -238,6 +238,17 @@ void inp_probe(struct card* deck)
             if (strchr("ehvk", *instname))
                 continue;
 
+            /* exclude a devices (code models may have special characters in their instance line.
+            digital nodes should not get V sources in series anyway.) */
+            if ('a' == *instname)
+                continue;
+
+            /* exclude x devices (Subcircuits may contain digital a devices,
+            and digital nodes should not get V sources in series anyway.),
+            when probe_alli_nox is set in .spiceinit. */
+            if ('x' == *instname && cp_getvar("probe_alli_nox", CP_BOOL, NULL, 0))
+                continue;
+
             /* special treatment for controlled current sources and switches:
                We have three or four tokens until model name, but only the first 2 are relevant nodes. */
             if (strchr("fgsw", *instname))
@@ -304,7 +315,11 @@ void inp_probe(struct card* deck)
                     nodename = get_terminal_name(instname, nodebuf, instances);
                     char* vline = tprintf("vcurr_%s:%s:%s_%s %s %s 0", instname, nodename, thisnode, nodebuf, thisnode, newnode);
                     card = insert_new_line(card, vline, 0, 0);
-
+                    /* special for KiCad: add shunt resistor if thisnode contains 'unconnected' */
+                    if (*instname == 'x' && strstr(thisnode, "unconnected")) {
+                        char *rline = tprintf("R%s %s 0 1e15", thisnode, thisnode);
+                        card = insert_new_line(card, rline, 0, 0);
+                    }
                     char* nodesaves = tprintf("%s:%s#branch", instname, nodename);
                     allsaves = wl_cons(nodesaves, allsaves);
 
@@ -1215,23 +1230,25 @@ static char* get_terminal_number(char* element, char* namestr)
    Called from inp.c*/
 void modprobenames(INPtables* tab) {
     GENinstance* GENinst;
-    for (GENinst = tab->defVmod->GENinstances; GENinst; GENinst = GENinst->GENnextInstance) {
-        char* name = GENinst->GENname;
-        if (prefix("vcurr_", name)) {
-            /* copy from char no. 6 to (and excluding) second colon */
-            char* endname = strchr(name, ':');
-            char* endname2 = strchr(endname + 1, ':');
-            /* two-terminal device, one colon, copy all from char no. 6 to (and excluding) colon */
-            if (!endname2) {
-                char* newname = copy_substring(name + 6, endname);
-                memcpy(name, newname, strlen(newname) + 1);
-                tfree(newname);
-            }
-            /* copy from char no. 6 to (and excluding) second colon */
-            else {
-                char* newname = copy_substring(name + 6, endname2);
-                memcpy(name, newname, strlen(newname) + 1);
-                tfree(newname);
+    if (tab->defVmod) {
+        for (GENinst = tab->defVmod->GENinstances; GENinst; GENinst = GENinst->GENnextInstance) {
+            char* name = GENinst->GENname;
+            if (prefix("vcurr_", name)) {
+                /* copy from char no. 6 to (and excluding) second colon */
+                char* endname = strchr(name, ':');
+                char* endname2 = strchr(endname + 1, ':');
+                /* two-terminal device, one colon, copy all from char no. 6 to (and excluding) colon */
+                if (!endname2) {
+                    char* newname = copy_substring(name + 6, endname);
+                    memcpy(name, newname, strlen(newname) + 1);
+                    tfree(newname);
+                }
+                /* copy from char no. 6 to (and excluding) second colon */
+                else {
+                    char* newname = copy_substring(name + 6, endname2);
+                    memcpy(name, newname, strlen(newname) + 1);
+                    tfree(newname);
+                }
             }
         }
     }

@@ -15,7 +15,7 @@
 #define PACKAGE "ngspice"
 
 /* Version number of package */
-#define VERSION "38"
+#define VERSION "39"
 
 /* Define the directory for executables */
 #define NGSPICEBINDIR "../bin"
@@ -29,9 +29,10 @@
 /********* Don't change entries found below ***************************/
 
 /* The xspice enhancements */
-/* XSPICE is always included in the Visual Studio compiled executable */
 #define XSPICE 1
-/* don't undef XSPICE, otherwise compilation will fail */
+
+/* The OSDI enhancements */
+#define OSDI 1
 
 /* The CIDER enhancements */
 #define CIDER 1

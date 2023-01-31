@@ -136,6 +136,7 @@ libfte_la_SOURCES = \
     inventory.c     \
     linear.c    \
     linear.h    \
+    logicexp.c  \
     measure.c   \
     misccoms.c  \
     misccoms.h  \

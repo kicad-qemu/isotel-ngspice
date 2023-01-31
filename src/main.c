@@ -366,6 +366,12 @@ com_snsave(wordlist *wl)
 }
 
 void
+com_optran(wordlist *wl)
+{
+    NG_IGNORE(wl);
+}
+
+void
 SMPprint(SMPmatrix *n1, char *n2)
 {
     NG_IGNORE(n1);
@@ -428,6 +434,12 @@ EVTswitch_plot(CKTcircuit* ckt, const char* plottypename)
     return 1;
 };
 
+void
+EVTsave(wordlist* wl)
+{
+    NG_IGNORE(wl);
+}
+
 int
 load_opus(const char *name)
 {
@@ -465,6 +477,9 @@ EVTfindvec(char *node) {
     NG_IGNORE(node);
     return NULL;
 }
+
+void NIresetwarnmsg(void)
+{}
 
 #endif /* XSPICE */
 
@@ -809,8 +824,10 @@ int main(int argc, char **argv)
     bool iflag = FALSE; /* flag for interactive mode */
     bool qflag = FALSE; /* flag for command completion */
 
+    bool t = TRUE;
+
     FILE * volatile circuit_file;
-    bool oflag = FALSE;
+    bool volatile oflag = FALSE;
     bool srflag = FALSE;
 
 #ifdef TRACE
@@ -851,6 +868,7 @@ int main(int argc, char **argv)
     }
 #endif
 
+
     ivars(argv[0]); /* Create internal variables */
 
     /* Set default data sources */
@@ -879,6 +897,15 @@ int main(int argc, char **argv)
     int ii = 1;
     cp_vset("rndseed", CP_NUM, &ii);
     com_sseed(NULL);
+
+    /* set a boolean variable when XSPICE and/or OSDI is enabled,
+       to be used in spinit etc. */
+#if defined(SIMULATOR) && defined(XSPICE)
+    cp_vset("xspice_enabled", CP_BOOL, &t);
+#endif
+#if defined(SIMULATOR) && defined(OSDI)
+    cp_vset("osdi_enabled", CP_BOOL, &t);
+#endif
 
     /* --- Process command line options --- */
     for (;;) {
