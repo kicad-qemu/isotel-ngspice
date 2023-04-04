@@ -313,6 +313,12 @@ void inp_probe(struct card* deck)
                     /* to make the nodes unique */
                     snprintf(nodebuf, 12, "%d", i);
                     nodename = get_terminal_name(instname, nodebuf, instances);
+                    if (!nodename || *nodename == '\0') {
+                        fprintf(stderr, "Warning: Cannot find node name %d in line %s\n", i, curr_line);
+                        fprintf(stderr, "    Instance not ready for .probe command\n");
+                        tfree(thisnode);
+                        continue;
+                    }
                     char* vline = tprintf("vcurr_%s:%s:%s_%s %s %s 0", instname, nodename, thisnode, nodebuf, thisnode, newnode);
                     card = insert_new_line(card, vline, 0, 0);
                     /* special for KiCad: add shunt resistor if thisnode contains 'unconnected' */
@@ -874,6 +880,12 @@ void inp_probe(struct card* deck)
                 else
                     numnodes = get_number_terminals(thisline);
 
+                if (numnodes < 2) {
+                    fprintf(stderr, "Warning: Power mesasurement not available,\n   .probe %s will be ignored\n", wltmp->wl_word);
+                    tfree(instname);
+                    continue;
+                }
+
                 int err = 0;
                 /* call fcn with power requested */
                 err = setallvsources(tmpcard, instances, instname, numnodes, haveall, TRUE);
@@ -1030,10 +1042,27 @@ static char *get_terminal_name(char* element, char *numberstr, NGHASHPTR instanc
         for (i = 0; i <= numnodes; i++)
             thisline = nexttok(thisline);
         subcktname = gettok(&thisline);
+
         /*Search for the corresponding .subckt line*/
         struct card_assoc* allsubs = xcard->level->subckts;
+
+        if (!allsubs) {
+            char* instline = xcard->line;
+            char* inst = gettok(&instline);
+            fprintf(stderr, "Warning: No .subckt line found during evaluating command .probe (...)!\n");
+            fprintf(stderr, "    failing instance: %s\n", inst);
+            tfree(subcktname);
+            tfree(inst);
+            return tprintf("n%s", numberstr);
+        }
+
         while (allsubs) {
             xcardsubsline = allsubs->line->line;
+            /* safeguard against NULL pointers) */
+            if (!subcktname || !allsubs->name) {
+                tfree(subcktname);
+                return tprintf("n%s", numberstr);
+            }
             if (cieq(subcktname, allsubs->name))
                 break;
             allsubs = allsubs->next;
@@ -1230,13 +1259,17 @@ static char* get_terminal_number(char* element, char* namestr)
    Called from inp.c*/
 void modprobenames(INPtables* tab) {
     GENinstance* GENinst;
-    if (tab->defVmod) {
+    if (tab && tab->defVmod && tab->defVmod->GENinstances) {
         for (GENinst = tab->defVmod->GENinstances; GENinst; GENinst = GENinst->GENnextInstance) {
             char* name = GENinst->GENname;
             if (prefix("vcurr_", name)) {
                 /* copy from char no. 6 to (and excluding) second colon */
+                char* endname2;
                 char* endname = strchr(name, ':');
-                char* endname2 = strchr(endname + 1, ':');
+                if (endname)
+                    endname2 = strchr(endname + 1, ':');
+                else /* not a single colon, something different? */
+                    continue;
                 /* two-terminal device, one colon, copy all from char no. 6 to (and excluding) colon */
                 if (!endname2) {
                     char* newname = copy_substring(name + 6, endname);
@@ -1259,7 +1292,7 @@ void modprobenames(INPtables* tab) {
    If .probe p(Q1) is found, flag power is true, then do additional power calculations:
    Define a reference voltage of an n-terminal device as Vref = (V(1) + V(2) +...+ V(n)) / n  with terminal (node) voltages V(n).
    Calculate power PQ1 = (v(1) - Vref) * i1 + (V(2) - Vref) * i2 + ... + (V(n) - Vref) * in) with terminal currents in.
-   See "Quantities of a Multiterminal Circuit Determined on the Basis of Kirchhoff’s Laws", M. Depenbrock, 
+   See "Quantities of a Multiterminal Circuit Determined on the Basis of Kirchhoffï¿½s Laws", M. Depenbrock, 
    ETEP Vol. 8, No. 4, July/August 1998.
    probe_int_ is used to trigger supressing the vectors when saving the results. Internal vectors thus are
    not saved. */

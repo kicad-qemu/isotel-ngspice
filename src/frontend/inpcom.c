@@ -1538,6 +1538,7 @@ struct inp_read_t inp_read( FILE *fp, int call_depth, const char *dir_name,
             }
             else if (ciprefix("print", buffer) ||
                     ciprefix("eprint", buffer) ||
+                    ciprefix("eprvcd", buffer) ||
                     ciprefix("asciiplot", buffer)) {
                 /* lower case excluded for tokens following output redirection
                  * '>' */
@@ -2491,6 +2492,8 @@ static int is_a_modelname(char *s, const char* line)
         case 'P':
         case 'f':
         case 'F':
+        case 'a':
+        case 'A':
             st = st + 1;
             break;
         case 'm':
@@ -4535,9 +4538,24 @@ static int inp_get_param_level(
         int param_num, struct dependency *deps, int num_params)
 {
     int i, k, l, level = 0;
+    static int recounter = 0;
+    recounter++;
 
-    if (deps[param_num].level != -1)
+    if (recounter > 1000) { /* magic number 1000: if larger, stack overflow occurs */
+        fprintf(stderr,
+            "ERROR: A level depth greater 1000 for dependent parameters is not supported!\n");
+        fprintf(stderr,
+            "    You probably do have a circular parameter dependency at line\n");
+        fprintf(stderr,
+            "    %s\n", deps[param_num].card->line);
+        recounter = 0;
+        controlled_exit(EXIT_FAILURE);
+    }
+
+    if (deps[param_num].level != -1) {
+        recounter = 0;
         return deps[param_num].level;
+    }
 
     for (i = 0; deps[param_num].depends_on[i]; i++) {
 
@@ -4549,6 +4567,7 @@ static int inp_get_param_level(
             fprintf(stderr,
                     "ERROR: unable to find dependency parameter for %s!\n",
                     deps[param_num].param_name);
+            recounter = 0;
             controlled_exit(EXIT_FAILURE);
         }
 
@@ -4559,6 +4578,7 @@ static int inp_get_param_level(
     }
 
     deps[param_num].level = level;
+    recounter = 0;
 
     return level;
 }
@@ -5078,6 +5098,8 @@ static int inp_split_multi_param_lines(struct card *card, int line_num)
                             end_param++;
                         if (*end_param == '"')
                             end_param++;
+                    } else if (*end_param == ',' && paren_depth == 0) {
+                        break;
                     } else {
                         while (*end_param != '\0' && *end_param != '"' &&
                                (!isspace_c(*end_param) ||
@@ -5086,11 +5108,11 @@ static int inp_split_multi_param_lines(struct card *card, int line_num)
                                 break;
                             if (*end_param == '{')
                                 ++expression_depth;
-                            if (*end_param == '(')
+                            else if (*end_param == '(')
                                 ++paren_depth;
-                            if (*end_param == '}' && expression_depth > 0)
+                            else if (*end_param == '}' && expression_depth > 0)
                                 --expression_depth;
-                            if (*end_param == ')' && paren_depth > 0)
+                            else if (*end_param == ')' && paren_depth > 0)
                                 --paren_depth;
                             end_param++;
                         }
@@ -8633,7 +8655,15 @@ static struct card *pspice_compat(struct card *oldcard)
             char *cut_del = curr_line = cut_line = inp_remove_ws(copy(cut_line));
             cut_line = nexttok(cut_line); /* skip .model */
             modname = gettok(&cut_line); /* save model name */
+            if (!modname) {
+                fprintf(stderr, "Error: No model name given for %s\n", curr_line);
+                controlled_exit(EXIT_BAD);
+            }
             modtype = gettok_noparens(&cut_line); /* save model type */
+            if (!modtype) {
+                fprintf(stderr, "Error: No model type given for %s\n", curr_line);
+                controlled_exit(EXIT_BAD);
+            }
             if (cieq(modtype, "NMOS") || cieq(modtype, "PMOS")) {
                 char* lv = strstr(cut_line, "level=");
                 if (lv) {
@@ -8793,6 +8823,7 @@ static struct card *pspice_compat(struct card *oldcard)
             }
             char *tctok = search_plain_identifier(ntok, "tc");
             if (tctok) {
+                char *tc1, *tc2;
                 char *tctok1 = strchr(tctok, '=');
                 if (tctok1)
                     /* skip '=' */
@@ -8800,8 +8831,23 @@ static struct card *pspice_compat(struct card *oldcard)
                 else
                     /* no '=' found, skip 'tc' */
                     tctok1 = tctok + 2;
-                char *tc1 = gettok_node(&tctok1);
-                char *tc2 = gettok_node(&tctok1);
+                /* tc1 may be an expression, enclosed in {} */
+                if (*tctok1 == '{') {
+                    tc1 = gettok_char(&tctok1, '}', TRUE, TRUE);
+                }
+                else {
+                    tc1 = gettok_node(&tctok1);
+                }
+                /* skip spaces and commas */
+                while (isspace_c(*tctok1) || (*tctok1 == ','))
+                   tctok1++;
+                /* tc2 may be an expression, enclosed in {} */
+                if (*tctok1 == '{') {
+                    tc2 = gettok_char(&tctok1, '}', TRUE, TRUE);
+                }
+                else {
+                    tc2 = gettok_node(&tctok1);
+                }
                 tctok[-1] = '\0';
                 char *newstring;
                 if (tc1 && tc2)
@@ -9724,8 +9770,14 @@ static struct card *ltspice_compat(struct card *oldcard)
             /* check for the model name */
             int i;
             char *stoks[4];
-            for (i = 0; i < 4; i++)
+            for (i = 0; i < 4; i++) {
                 stoks[i] = gettok_node(&cut_line);
+                if (stoks[i] == NULL) {
+                    fprintf(stderr, "Error in line %d: buggy diode instance line\n    %s\n", card->linenum_orig, card->line);
+                    fprintf(stderr, "At least 'Dxx n1 n2 d' is required.\n");
+                    controlled_exit(EXIT_BAD);
+                }
+            }
             /* rewrite d line and replace it if a model is found */
             if ((nesting > 0) &&
                     find_a_model(modelsfound, stoks[3], subcktline->line)) {
@@ -9769,6 +9821,19 @@ static void inp_check_syntax(struct card *deck)
     if (ciprefix(".param", deck->line) || ciprefix(".meas", deck->line)) {
         fprintf(cp_err, "\nError: title line is missing!\n\n");
         controlled_exit(EXIT_BAD);
+    }
+
+
+    /* When '.probe alli' is set, disable auto bridging and set a flag */
+    for (card = deck; card; card = card->nextcard) {
+        char* cut_line = card->line;
+        if (ciprefix(".probe", cut_line) && search_plain_identifier(cut_line, "alli")) {
+            int i = 0;
+            bool bi = TRUE;
+            cp_vset("auto_bridge", CP_NUM, &i);
+            cp_vset("probe_alli_given", CP_BOOL, &bi);
+            break;
+        }
     }
 
     for (ii = 0; ii < 10; ii++)
@@ -10250,6 +10315,11 @@ void inp_rem_unused_models(struct nscope *root, struct card *deck)
             struct modellist *modl_new;
             modl_new = TMALLOC(struct modellist, 1);
             char *model_type = get_model_type(curr_line);
+            if (!model_type) {
+                fprintf(stderr, "Error: no model type given in line %s!\n", curr_line);
+                tfree(modl_new);
+                controlled_exit(EXIT_BAD);
+            }
             modl_new->elemb = inp_get_elem_ident(model_type);
             modl_new->modelname = get_subckt_model_name(curr_line);
             modl_new->model = card;

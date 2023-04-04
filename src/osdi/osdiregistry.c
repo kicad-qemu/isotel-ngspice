@@ -302,6 +302,7 @@ extern OsdiObjectFile load_object_file(const char *input) {
    * nghash_insert returns NULL if the key (handle) was not already in the table
    * and the data (DUMMYDATA) that was previously insered (!= NULL) otherwise*/
   if (nghash_insert(known_object_files, handle, DUMMYDATA)) {
+    txfree(path);
     return EMPTY_OBJECT;
   }
 
@@ -313,6 +314,7 @@ extern OsdiObjectFile load_object_file(const char *input) {
     printf("NGSPICE only supports OSDI v%d.%d but \"%s\" targets v%d.%d!",
            OSDI_VERSION_MAJOR_CURR, OSDI_VERSION_MINOR_CURR, path,
            OSDI_VERSION_MAJOR, OSDI_VERSION_MINOR);
+    txfree(path);
     return INVALID_OBJECT;
   }
 
@@ -383,6 +385,7 @@ extern OsdiObjectFile load_object_file(const char *input) {
     };
   }
 
+  txfree(path);
   return (OsdiObjectFile){
       .entrys = dst,
       .num_entries = (int)OSDI_NUM_DESCRIPTORS,

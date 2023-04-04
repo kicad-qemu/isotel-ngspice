@@ -60,6 +60,7 @@ static char *upper(register char *string);
 static void rem_unused_mos_models(struct card* deck);
 
 extern void com_optran(wordlist * wl);
+extern void tprint(struct card *deck);
 
 
 //void inp_source_recent(void);
@@ -1121,7 +1122,8 @@ inp_spsource(FILE *fp, bool comfile, char *filename, bool intfile)
             inputdir = dir_name;
 #endif
             if (cp_getvar("controlswait", CP_BOOL, NULL, 0)) {
-                exec_controls(wl_copy(wl));
+                if (wl)
+                    exec_controls(wl_copy(wl));
                 break;
             }
             else

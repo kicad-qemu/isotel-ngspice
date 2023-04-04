@@ -15,7 +15,7 @@
 #define PACKAGE "ngspice"
 
 /* Version number of package */
-#define VERSION "39"
+#define VERSION "40"
 
 /* Define the directory for executables */
 #define NGSPICEBINDIR "../bin"
@@ -476,7 +476,7 @@
 
 
 /* Define to the address where bug reports for this package should be sent. */
-#define PACKAGE_BUGREPORT "http://ngspice.sourceforge.net/bugrep.html"
+#define PACKAGE_BUGREPORT "https://ngspice.sourceforge.io/bugrep.html"
 
 /* Define to the full name of this package. */
 #define PACKAGE_NAME PACKAGE
@@ -498,9 +498,6 @@
 
 /* Define if you want to debug pole-zero analysis */
 /* #undef PZDEBUG */
-
-/* Define as the return type of signal handlers (`int' or `void'). */
-#define RETSIGTYPE void
 
 /* Define to the type of arg 1 for `select'. */
 /* #undef SELECT_TYPE_ARG1 */

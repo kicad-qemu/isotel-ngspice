@@ -58,6 +58,7 @@
 #include "ngspice/macros.h"
 #include "ngspice/udevices.h"
 #include "ngspice/logicexp.h"
+#include "ngspice/dstring.h"
 
 extern struct card* insert_new_line(
     struct card* card, char* line, int linenum, int linenum_orig);
@@ -206,6 +207,8 @@ struct name_entry {
     char *name;
     NAME_ENTRY next;
 };
+
+static char *get_zero_rise_fall(void);
 
 #ifdef TRACE
 static void print_name_list(NAME_ENTRY nelist);
@@ -386,6 +389,22 @@ static void add_port_name(char *name)
     add_pin_name(name, &port_names_list);
 }
 
+void u_remember_pin(char *name, int type)
+{
+    switch (type) {
+    case 1:  add_input_pin(name);
+        break;
+    case 2:  add_output_pin(name);
+        break;
+    case 3:  add_tristate_pin(name);
+        break;
+    case 4:  add_port_name(name);
+        break;
+    default:
+        break;
+    }
+}
+
 static void add_all_port_names(char *subckt_line)
 {
     char *copy_line, *tok, *pos;
@@ -393,9 +412,9 @@ static void add_all_port_names(char *subckt_line)
     if (!subckt_line) {
         return;
     }
-    if (ps_port_directions >= 2) {
+    if (ps_port_directions & 4) {
         printf("TRANS_IN  %s\n", subckt_line);
-    } else if (ps_port_directions) {
+    } else if (ps_port_directions & 1) {
         printf("%s\n", subckt_line);
     }
     copy_line = tprintf("%s", subckt_line);
@@ -729,7 +748,7 @@ struct card *replacement_udevice_cards(void)
     }
     if (add_zero_delay_inverter_model) {
         x = create_xlate_translated(
-        ".model d_zero_inv99 d_inverter(rise_delay=1.0e-12 fall_delay=1.0e-12)");
+        ".model d_zero_inv99 d_inverter(inertial_delay=true rise_delay=1.0e-12 fall_delay=1.0e-12)");
         translated_p = add_xlator(translated_p, x);
     }
     if (add_drive_hilo) {
@@ -738,7 +757,7 @@ struct card *replacement_udevice_cards(void)
         x = create_xlate_translated("a1 0 drive___0 dbuf1");
         translated_p = add_xlator(translated_p, x);
         x = create_xlate_translated(
-        ".model dbuf1 d_buffer(rise_delay=1.0e-12 fall_delay=1.0e-12)");
+        ".model dbuf1 d_buffer(inertial_delay=true rise_delay=1.0e-12 fall_delay=1.0e-12)");
         translated_p = add_xlator(translated_p, x);
         x = create_xlate_translated(".ends hilo_dollar___lo");
         translated_p = add_xlator(translated_p, x);
@@ -747,7 +766,7 @@ struct card *replacement_udevice_cards(void)
         x = create_xlate_translated("a2 0 drive___1 dinv1");
         translated_p = add_xlator(translated_p, x);
         x = create_xlate_translated(
-        ".model dinv1 d_inverter(rise_delay=1.0e-12 fall_delay=1.0e-12)");
+        ".model dinv1 d_inverter(inertial_delay=true rise_delay=1.0e-12 fall_delay=1.0e-12)");
         translated_p = add_xlator(translated_p, x);
         x = create_xlate_translated(".ends hilo_dollar___hi");
         translated_p = add_xlator(translated_p, x);
@@ -757,8 +776,25 @@ struct card *replacement_udevice_cards(void)
         translated_p = add_xlator(translated_p, x);
 
     }
+    if (current_subckt && (ps_port_directions & 2)) {
+        char *tmp = NULL, *pos = NULL, *posp = NULL;
+        tmp = TMALLOC(char, strlen(current_subckt) + 1);
+        (void) memcpy(tmp, current_subckt, strlen(current_subckt) + 1);
+        pos = strstr(tmp, "optional:");
+        posp = strstr(tmp, "params:");
+        /* If there is an optional: and a param: then posp > pos */
+        if (pos) {
+            /* Remove the optional: section if present */
+            *pos = '\0';
+            if (posp) {
+                strcat(tmp, posp);
+            }
+        }
+        printf("\nTRANS_OUT  %s\n", tmp);
+        tfree(tmp);
+    }
     for (x = first_xlator(translated_p); x; x = next_xlator(translated_p)) {
-        if (ps_port_directions >= 2) {
+        if (ps_port_directions & 2) {
             printf("TRANS_OUT  %s\n", x->translated);
         }
         new_str = copy(x->translated);
@@ -772,6 +808,18 @@ struct card *replacement_udevice_cards(void)
             count++;
             nextcard = insert_new_line(nextcard, new_str, 0, 0);
         }
+    }
+    if (current_subckt && (ps_port_directions & 2)) {
+        char *p1 = NULL, *p2 = NULL;
+        DS_CREATE(tmpds, 64);
+        p1 = strstr(current_subckt, ".subckt");
+        p1 += strlen(".subckt");
+        p1 = skip_ws(p1);
+        p2 = p1;
+        p2 = skip_non_ws(p2);
+        ds_cat_mem(&tmpds, p1, (p2 - p1));
+        printf("TRANS_OUT  .ends %s\n\n", ds_get_buf(&tmpds));
+        ds_free(&tmpds);
     }
     return newcard;
 }
@@ -811,8 +859,9 @@ void initialize_udevice(char *subckt_line)
     num_name_collisions = 0;
     /*
       Variable ps_port_directions != 0 to turn on pins and ports.
-      If ps_port_directions >= 2 also print the Pspice input lines with
-      prefix TRANS_IN, and the translated Xspice equivalent lines
+      If (ps_port_directions & 4) also print the Pspice input lines with
+      prefix TRANS_IN.
+      If (ps_port_directions & 2) print translated Xspice equivalent lines
       with prefix TRANS_OUT.
     */
     if (!cp_getvar("ps_port_directions", CP_NUM, &ps_port_directions, 0)) {
@@ -842,7 +891,8 @@ void initialize_udevice(char *subckt_line)
     model_xlatorp = create_xlator();
     default_models = create_xlator();
     /*  .model d0_gate ugate ()  */
-    xdata = create_xlate("", "", "ugate", "", "d0_gate", "");
+    xdata = create_xlate("", "(inertial_delay=true rise_delay=1.0e-12 fall_delay=1.0e-12)",
+        "ugate", "", "d0_gate", "");
     (void) add_xlator(default_models, xdata);
     /*  .model d0_gff ugff ()  */
     xdata = create_xlate("", "", "ugff", "d_dlatch", "d0_gff", "");
@@ -853,7 +903,8 @@ void initialize_udevice(char *subckt_line)
     xdata = create_xlate("", "", "ueff", "", "d0_eff", "");
     (void) add_xlator(default_models, xdata);
     /*  .model d0_tgate utgate ()  */
-    xdata = create_xlate("", "", "utgate", "", "d0_tgate", "");
+    xdata = create_xlate("", "(inertial_delay=true delay=1.0e-12)",
+        "utgate", "", "d0_tgate", "");
     (void) add_xlator(default_models, xdata);
     /* reset for the new subckt */
     add_zero_delay_inverter_model = FALSE;
@@ -886,7 +937,7 @@ static void determine_port_type(void)
                 port_type = "IN";
             }
         }
-        if (ps_port_directions) {
+        if (ps_port_directions & 1) {
             printf("port: %s %s\n", x->name, port_type);
         }
     }
@@ -1939,6 +1990,7 @@ static Xlatorp gen_compound_instance(struct compound_instance *compi)
     char *new_inst = NULL, *model_stmt = NULL, *final_model_name = NULL;
     char *new_stmt = NULL, *instance_name = NULL;
     char *tmp;
+    char *zero_delay_str = NULL;
     size_t sz = 0;
     Xlatorp xxp = NULL;
     Xlatep xdata = NULL;
@@ -2016,10 +2068,13 @@ static Xlatorp gen_compound_instance(struct compound_instance *compi)
         }
     }
     /* .model statement for the input gates */
-    model_stmt = tprintf(".model %s %s", model_name, ingates);
+    zero_delay_str = get_zero_rise_fall();
+    model_stmt = tprintf(".model %s %s%s",
+        model_name, ingates, zero_delay_str);
     xdata = create_xlate_translated(model_stmt);
     xxp = add_xlator(xxp, xdata);
     tfree(model_stmt);
+    tfree(zero_delay_str);
 
     /* Final OR/NOR, AND/NAND gate */
     final_model_name = tprintf("%s_out", model_name);
@@ -2185,6 +2240,7 @@ static Xlatorp gen_gate_instance(struct gate_instance *gip)
         } else {
             char *new_model_nm = NULL;
             char *new_stmt = NULL;
+            char *zero_rise_fall = NULL;
             /*
              Use connector as original gate output and tristate input;
              tristate has original gate output and utgate delay;
@@ -2198,10 +2254,13 @@ static Xlatorp gen_gate_instance(struct gate_instance *gip)
             xxp = add_xlator(xxp, xdata);
             tfree(new_stmt);
             /* new model statement e.g.   .model d_au2nand3 d_nand */
-            new_stmt = tprintf(".model %s %s", modelnm, xspice);
+            zero_rise_fall = get_zero_rise_fall();
+            new_stmt = tprintf(".model %s %s%s", modelnm, xspice,
+                zero_rise_fall);
             xdata = create_xlate_translated(new_stmt);
             xxp = add_xlator(xxp, xdata);
             tfree(new_stmt);
+            tfree(zero_rise_fall);
             /* now the added tristate */
             /* model name of added tristate */
             new_model_nm = tprintf("d_a%s_tribuf", iname);
@@ -2342,10 +2401,13 @@ static Xlatorp gen_gate_instance(struct gate_instance *gip)
                 char *str1 = NULL, *modname = NULL;
                 if (i == 0) {
                     /* Zero delay model for all original array instances */
-                    str1 = tprintf(".model %s %s", primary_model, xspice); 
+                    char *zero_delay_str = get_zero_rise_fall();
+                    str1 = tprintf(".model %s %s%s",
+                        primary_model, xspice, zero_delay_str);
                     xdata = create_xlate_translated(str1);
                     xxp = add_xlator(xxp, xdata);
                     tfree(str1);
+                    tfree(zero_delay_str);
                 }
                 /* model name of added tristate */
                 modname = tprintf("d_a%s_tribuf", iname);
@@ -2555,13 +2617,15 @@ static char *larger_delay(char *delay1, char *delay2)
 */
 static char *get_zero_rise_fall(void)
 {
-    return tprintf("(rise_delay=1.0e-12 fall_delay=1.0e-12)");
+    /* The caller needs to tfree the returned string after use */
+    return tprintf("(inertial_delay=true rise_delay=1.0e-12 fall_delay=1.0e-12)");
 }
 
 static char *get_delays_ugate(char *rem)
 {
     char *rising, *falling, *delays = NULL;
     struct timing_data *tdp1, *tdp2;
+    BOOL has_rising = FALSE, has_falling = FALSE;
 
     tdp1 = create_min_typ_max("tplh", rem);
     estimate_typ(tdp1);
@@ -2569,13 +2633,19 @@ static char *get_delays_ugate(char *rem)
     tdp2 = create_min_typ_max("tphl", rem);
     estimate_typ(tdp2);
     falling = get_estimate(tdp2);
-    if (rising && falling) {
-        if (strlen(rising) > 0 && strlen(falling) > 0) {
-            delays = tprintf("(rise_delay = %s fall_delay = %s)",
+    has_rising = (rising && strlen(rising) > 0);
+    has_falling = (falling && strlen(falling) > 0);
+    if (has_rising) {
+        if (has_falling) {
+            delays = tprintf("(inertial_delay=true rise_delay = %s fall_delay = %s)",
                             rising, falling);
         } else {
-            delays = get_zero_rise_fall();
+            delays = tprintf("(inertial_delay=true rise_delay = %s fall_delay = 1.0e-12)",
+                            rising);
         }
+    } else if (has_falling) {
+        delays = tprintf("(inertial_delay=true rise_delay = 1.0e-12 fall_delay = %s)",
+                        falling);
     } else {
         delays = get_zero_rise_fall();
     }
@@ -2592,6 +2662,7 @@ static char *get_delays_utgate(char *rem)
     struct timing_data *tdp3, *tdp4, *tdp5, *tdp6;
     char *tplz, *tphz, *tpzl, *tpzh, *larger, *larger1, *larger2, *larger3;
     BOOL use_zdelays = FALSE;
+    BOOL has_rising = FALSE, has_falling = FALSE;
 
     tdp1 = create_min_typ_max("tplh", rem);
     estimate_typ(tdp1);
@@ -2599,15 +2670,17 @@ static char *get_delays_utgate(char *rem)
     tdp2 = create_min_typ_max("tphl", rem);
     estimate_typ(tdp2);
     falling = get_estimate(tdp2);
-    if (rising && strlen(rising) > 0) {
-        if (falling && strlen(falling) > 0) {
+    has_rising = (rising && strlen(rising) > 0);
+    has_falling = (falling && strlen(falling) > 0);
+    if (has_rising) {
+        if (has_falling) {
             larger = larger_delay(rising, falling);
-            delays = tprintf("(delay = %s)", larger);
+            delays = tprintf("(inertial_delay=true delay = %s)", larger);
         } else {
-            delays = tprintf("(delay = %s)", rising);
+            delays = tprintf("(inertial_delay=true delay = %s)", rising);
         }
-    } else if (falling && strlen(falling) > 0) {
-        delays = tprintf("(delay = %s)", falling);
+    } else if (has_falling) {
+        delays = tprintf("(inertial_delay=true delay = %s)", falling);
     } else if (use_zdelays) {
         /* No lh/hl delays, so try the largest lz/hz/zl/zh delay */
         tdp3 = create_min_typ_max("tplz", rem);
@@ -2653,16 +2726,16 @@ static char *get_delays_utgate(char *rem)
             larger3 = larger2;
         }
         if (larger3) {
-            delays = tprintf("(delay = %s)", larger3);
+            delays = tprintf("(inertial_delay=true delay = %s)", larger3);
         } else {
-            delays = tprintf("(delay=1.0e-12)");
+            delays = tprintf("(inertial_delay=true delay=1.0e-12)");
         }
         delete_timing_data(tdp3);
         delete_timing_data(tdp4);
         delete_timing_data(tdp5);
         delete_timing_data(tdp6);
     } else { // Not use_zdelays
-        delays = tprintf("(delay=1.0e-12)");
+        delays = tprintf("(inertial_delay=true delay=1.0e-12)");
     }
     delete_timing_data(tdp1);
     delete_timing_data(tdp2);
@@ -2714,19 +2787,19 @@ static char *get_delays_ueff(char *rem)
     }
     if (clkd && setd) {
         delays = tprintf("(clk_delay = %s "
-            "set_delay = %s reset_delay = %s "
-            "rise_delay = 1.0ns fall_delay = 2.0ns)",
+            "set_delay = %s reset_delay = %s"
+            " rise_delay = 1.0ns fall_delay = 1.0ns)",
             clkd, setd, resetd);
     } else if (clkd) {
-        delays = tprintf("(clk_delay = %s "
-            "rise_delay = 1.0ns fall_delay = 2.0ns)",
+        delays = tprintf("(clk_delay = %s"
+            " rise_delay = 1.0ns fall_delay = 1.0ns)",
             clkd);
     } else if (setd) {
-        delays = tprintf("(set_delay = %s reset_delay = %s "
-            "rise_delay = 1.0ns fall_delay = 2.0ns)",
+        delays = tprintf("(set_delay = %s reset_delay = %s"
+            " rise_delay = 1.0ns fall_delay = 1.0ns)",
             setd, resetd);
     } else {
-        delays = tprintf("(rise_delay = 1.0ns fall_delay = 2.0ns)");
+        delays = tprintf("(rise_delay = 1.0ns fall_delay = 1.0ns)");
     }
     delete_timing_data(tdp1);
     delete_timing_data(tdp2);
@@ -2793,14 +2866,14 @@ static char *get_delays_ugff(char *rem, char *d_name)
     s1 = NULL;
     if (enab) {
         if (d_delay) {
-            s1 = tprintf("%s = %s enable_delay = %s ",
+            s1 = tprintf("%s = %s enable_delay = %s",
                 dname, d_delay, enab);
         } else {
-            s1 = tprintf("enable_delay = %s ", enab);
+            s1 = tprintf("enable_delay = %s", enab);
         }
     } else {
         if (d_delay) {
-            s1 = tprintf("%s = %s ", dname, d_delay);
+            s1 = tprintf("%s = %s", dname, d_delay);
         }
     }
     setd = NULL;
@@ -2816,18 +2889,19 @@ static char *get_delays_ugff(char *rem, char *d_name)
     } else if (tppcqhl && strlen(tppcqhl) > 0) {
         setd = resetd = tppcqhl;
     }
+    s2 = NULL;
     if (setd) {
-        s2 = tprintf("set_delay = %s reset_delay = %s "
-            "rise_delay = 1.0ns fall_delay = 2.0ns)",
+        s2 = tprintf("set_delay = %s reset_delay = %s"
+            " rise_delay = 1.0ns fall_delay = 1.0ns",
             setd, resetd);
     } else {
-        s2 = tprintf("rise_delay = 1.0ns fall_delay = 2.0ns)");
+        s2 = tprintf("rise_delay = 1.0ns fall_delay = 1.0ns");
     }
     if (s1) {
-        delays = tprintf("(%s%s", s1, s2);
+        delays = tprintf("(%s %s)", s1, s2);
         tfree(s1);
     } else {
-        delays = tprintf("(%s", s2);
+        delays = tprintf("(%s)", s2);
     }
     tfree(s2);
     delete_timing_data(tdp1);
@@ -3632,6 +3706,9 @@ BOOL u_process_instance(char *nline)
     if (!xspice) {
         if (eq(itype, "logicexp")) {
             delete_instance_hdr(hdr);
+            if (ps_port_directions & 4) {
+                printf("TRANS_IN  %s\n", nline);
+            }
             behav_ret = f_logicexp(nline);
             if (!behav_ret && current_subckt) {
                 fprintf(stderr, "ERROR in %s\n", current_subckt);
@@ -3644,6 +3721,9 @@ BOOL u_process_instance(char *nline)
             return behav_ret;
         } else if (eq(itype, "pindly")) {
             delete_instance_hdr(hdr);
+            if (ps_port_directions & 4) {
+                printf("TRANS_IN  %s\n", nline);
+            }
             behav_ret = f_pindly(nline);
             if (!behav_ret && current_subckt) {
                 fprintf(stderr, "ERROR in %s\n", current_subckt);
@@ -3662,7 +3742,7 @@ BOOL u_process_instance(char *nline)
             return FALSE;
         }
     }
-    if (ps_port_directions >= 2) {
+    if (ps_port_directions & 4) {
         printf("TRANS_IN  %s\n", nline);
     }
     /* Skip past instance name, type, pwr, gnd */
@@ -3722,7 +3802,7 @@ BOOL u_process_model_line(char *line)
 
     if (n > 0 && line[n] == '\n') line[n] = '\0';
     if (strncmp(line, ".model ", strlen(".model ")) == 0) {
-        if (ps_port_directions >= 2) {
+        if (ps_port_directions & 4) {
             printf("TRANS_IN  %s\n", line);
         }
         newline = TMALLOC(char, strlen(line) + 1);
